@@ -7,24 +7,25 @@ using ..GraphTraffic: SimulationID, SimulationResult, call_graphtraffic_rs, Simu
 export Experiment, simulation, analysis, visualization,
        run_simulation, run_analysis, run_visualization
 
+# Experiments select methods by type; run_* never constructs an instance.
 abstract type Experiment end
 
 """
-    simulation(experiment::Experiment) -> Vector{SimulationConfig}
+    simulation(experiment::Type{<:Experiment}) -> Vector{SimulationConfig}
 
 Generate the simulation configurations for an experiment.
 """
 function simulation end
 
 """
-    analysis(experiment::Experiment, results; num_threads) -> DataFrame
+    analysis(experiment::Type{<:Experiment}, results; num_threads) -> DataFrame
 
 Analyze results. The implementation decides how to use the requested thread count.
 """
 function analysis end
 
 """
-    visualization(experiment::Experiment, df; directory, num_threads) -> Nothing
+    visualization(experiment::Type{<:Experiment}, df; directory, num_threads) -> Nothing
 
 Write figures into `directory`. The implementation decides how to use the
 requested thread count; it need not parallelize plotting.
@@ -32,10 +33,10 @@ requested thread count; it need not parallelize plotting.
 function visualization end
 
 
-function default_directory(experiment::Experiment)
+function default_directory(experiment::Type{<:Experiment})
     project = Base.active_project()
     isnothing(project) && throw(ArgumentError("no active Julia project; pass directory explicitly"))
-    joinpath(dirname(project), "results", string(nameof(typeof(experiment))))
+    joinpath(dirname(project), "results", string(nameof(experiment)))
 end
 
 results_file(directory::AbstractString) = joinpath(directory, "results.hdf5")
@@ -57,7 +58,7 @@ function check_output(path::AbstractString, overwrite::Bool; figures::Bool=false
     nothing
 end
 
-function run_simulation(experiment::Experiment;
+function run_simulation(experiment::Type{<:Experiment};
                         directory::AbstractString=default_directory(experiment),
                         num_threads::Integer=default_num_threads(),
                         cascate_pipeline::Bool=false,
@@ -77,7 +78,7 @@ function run_simulation(experiment::Experiment;
 end
 
 
-function run_analysis(experiment::Experiment;
+function run_analysis(experiment::Type{<:Experiment};
                       directory::AbstractString=default_directory(experiment),
                       num_threads::Integer=default_num_threads(),
                       cascate_pipeline::Bool=false,
@@ -96,7 +97,7 @@ function run_analysis(experiment::Experiment;
 end
 
 
-function run_visualization(experiment::Experiment;
+function run_visualization(experiment::Type{<:Experiment};
                            directory::AbstractString=default_directory(experiment),
                            num_threads::Integer=default_num_threads(),
                            overwrite::Bool=false)
