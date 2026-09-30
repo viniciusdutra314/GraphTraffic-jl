@@ -32,9 +32,12 @@ function Base.getproperty(result::SimulationResult, name::Symbol)
     name === :average_delay && return average_ratio(
         read_dataset(result, "vertices_attributes"), :total_traveling_time,
         :total_distance) .- 1.0
-    name === :average_traveling_time && return average_ratio(
-        read_dataset(result, "vertices_attributes"), :total_traveling_time,
-        :num_arrived_msgs)
+    if name === :average_traveling_time
+        rows = read_dataset(result, "vertices_attributes")
+        arrived = sum(Float64(row.num_arrived_msgs) for row in rows)
+        arrived > 0 || throw(ArgumentError("no arrived packets to average"))
+        return sum(Float64(row.total_traveling_time) for row in rows) / arrived
+    end
     name === :message_rate && return Float64(metadata(result)["message_generation"])
     name === :routing && return read_routing(metadata(result)["routing_method"])
     name === :seed && return UInt64(metadata(result)["random_seed"])
@@ -50,5 +53,27 @@ function load_results(path::AbstractString)::Dict{SimulationID,SimulationResult}
             SimulationID(name) => SimulationResult(path,SimulationID(name))
             for name in keys(file["simulations_results"])
         )
+    end
+end
+function capacity_samples(result::SimulationResult)::Vector{NamedTuple{(:iteration, :capacities),Tuple{UInt64,Vector{UInt64}}}}
+    h5open(result.path, "r") do file
+        path = "simulations_results/$(result.id)/ObserverEdgeCapacity"
+        haskey(file, path) || throw(ArgumentError("ObserverEdgeCapacity was not recorded"))
+        group = file[path]
+        iterations = sort(parse.(UInt64, collect(keys(group))))
+        [(; iteration, capacities=read(group, "$iteration/capacities")) for iteration in iterations]
+    end
+end
+
+function average_edge_capacity(result::SimulationResult; over::Symbol=:samples)::Float64
+    if over === :final
+        capacities = [row.capacity for row in read_dataset(result, "edges_attributes")]
+        isempty(capacities) && throw(ArgumentError("no edges to average"))
+        return mean(Float64.(capacities))
+    elseif over === :samples
+        samples = capacity_samples(result)
+        isempty(samples) && throw(ArgumentError("no capacity samples after warmup"))
+        any(sample -> isempty(sample.capacities), samples) && throw(ArgumentError("no edges to average"))
+        return mean(mean(Float64.(sample.capacities)) for sample in samples)
     end
 end

@@ -30,5 +30,13 @@ function config_to_schema(config::SimulationConfig, graph_path::AbstractString)
        routing_method=wire_routing(config.routing),
        message_generation=config.message_rate, max_iterations=config.iterations,
        warm_up_iterations=config.warmup, random_seed=config.seed,
-       modifiers=(), observers=())
+       modifiers=wire_modifier.(config.modifiers), observers=wire_observer.(config.observers))
 end
+
+wire_observer(::ObserverEdgeQueue) = (; type="ObserverEdgeQueue")
+wire_observer(::ObserverEdgeReceivedMessages) = (; type="ObserverEdgeReceivedMessages")
+wire_observer(::ObserverTotalMessages) = (; type="ObserverTotalMessages")
+wire_observer(o::ObserverEdgeCapacity) = (; type="ObserverEdgeCapacity", update_interval=o.update_interval)
+wire_modifier(m::ModifierEdgeCapacity) = (
+    ; type="ModifierEdgeCapacity", free_flow_rate=m.free_flow_rate,
+    free_flow_sampling_time=m.free_flow_sampling_time)

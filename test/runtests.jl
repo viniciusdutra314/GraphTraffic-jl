@@ -185,7 +185,7 @@ end
             group["json_string"] = collect(codeunits(JSON.json((message_generation=0.2, random_seed=42, routing_method="minimal_paths"))))
         end
         @test result.average_delay == 1.5  # mean(8/2 -1,9/3 -1)= mean(3,2)
-        @test result.average_traveling_time == 3.5 #mean(4,3)= 3.5
+        @test result.average_traveling_time == 17 / 5 # Packet-weighted, not a mean of vertex means.
         @test result.message_rate == 0.2
         @test result.routing isa MinimalPaths
         @test load_results(path)[id].average_delay == 1.5
@@ -215,5 +215,82 @@ end
             configs; output=joinpath(dir, "threads.hdf5"), threads=0)
         repeated = call_graphtraffic_rs(reverse(configs); output=joinpath(dir, "repeat.hdf5"), threads=1)
         @test all(results[id].average_delay == repeated[id].average_delay for id in keys(results))
+    end
+end
+
+@testset "Typed observers and modifiers" begin
+    for interval in (0, -1)
+        @test_throws ArgumentError("update_interval must be positive") ObserverEdgeCapacity(update_interval=interval)
+        @test_throws ArgumentError("free_flow_sampling_time must be positive") ModifierEdgeCapacity(free_flow_rate=0.8, free_flow_sampling_time=interval)
+    end
+    for rate in (0, -1, 1.1, NaN, Inf)
+        @test_throws ArgumentError("free_flow_rate must be in (0, 1]") ModifierEdgeCapacity(free_flow_rate=rate, free_flow_sampling_time=5)
+    end
+    observers = Observer[ObserverEdgeQueue(), ObserverEdgeReceivedMessages(),
+                         ObserverEdgeCapacity(update_interval=5), ObserverTotalMessages()]
+    modifiers = [ModifierEdgeCapacity(free_flow_rate=0.9, free_flow_sampling_time=5)]
+    config = SimulationConfig(graph=cycle_graph(4), message_rate=0.2,
+        iterations=40, warmup=10, observers=observers, modifiers=modifiers)
+    empty!(observers)
+    empty!(modifiers)
+    @test length(config.observers) == 4
+    @test length(config.modifiers) == 1
+    plain = SimulationConfig(graph=cycle_graph(4), message_rate=0.2, iterations=40, warmup=10)
+    @test isempty(plain.observers) && isempty(plain.modifiers)
+    schema = GraphTraffic.config_to_schema(config, "graph.edgelist")
+    @test schema.observers == [(type="ObserverEdgeQueue",),
+        (type="ObserverEdgeReceivedMessages",),
+        (type="ObserverEdgeCapacity", update_interval=UInt64(5)), (type="ObserverTotalMessages",)]
+    @test schema.modifiers == [(type="ModifierEdgeCapacity", free_flow_rate=0.9,
+        free_flow_sampling_time=UInt64(5))]
+    mktempdir() do directory
+        results = call_graphtraffic_rs([config, plain]; output=joinpath(directory, "observed.hdf5"), threads=1)
+        observed = results[config.id]
+        samples = capacity_samples(observed)
+        @test getproperty.(samples, :iteration) == collect(15:5:40)
+        @test all(length(sample.capacities) == 4 for sample in samples)
+        @test average_edge_capacity(observed) >= 1
+        @test average_edge_capacity(observed; over=:final) >= 1
+        @test average_edge_capacity(results[plain.id]; over=:final) == 1
+        @test_throws ArgumentError("ObserverEdgeCapacity was not recorded") capacity_samples(results[plain.id])
+        meta = GraphTraffic.metadata(observed)
+        @test meta["observers"] == JSON.parse(JSON.json(schema.observers))
+        @test meta["modifiers"] == JSON.parse(JSON.json(schema.modifiers))
+        h5open(observed.path, "r") do file
+            group = file["simulations_results/$(observed.id)"]
+            @test length(read(group, "ObserverTotalMessages")) == 30
+            for observer in ("ObserverEdgeQueue", "ObserverEdgeReceivedMessages")
+                @test length(keys(group[observer])) == 4
+                @test sum(read(group, "$observer/0/values")) == 30
+            end
+        end
+    end
+end
+
+@testset "Capacity aggregation and missing samples" begin
+    mktempdir() do directory
+        path = joinpath(directory, "capacity.hdf5")
+        id = uuid4()
+        h5open(path, "w") do file
+            group = create_group(file, "simulations_results/$id")
+            group["edges_attributes"] = [(capacity=UInt64(9),), (capacity=UInt64(11),)]
+            observer = create_group(group, "ObserverEdgeCapacity")
+            for (iteration, values) in ((2, UInt64[1, 3]), (10, UInt64[5, 7]))
+                create_group(observer, string(iteration))["capacities"] = values
+            end
+        end
+        result = SimulationResult(path, id)
+        @test getproperty.(capacity_samples(result), :iteration) == [2, 10]
+        @test average_edge_capacity(result) == 4
+        @test average_edge_capacity(result; over=:final) == 10
+        empty_id = uuid4()
+        h5open(path, "r+") do file
+            group = create_group(file, "simulations_results/$empty_id")
+            create_group(group, "ObserverEdgeCapacity")
+            group["vertices_attributes"] = [(total_traveling_time=UInt64(0), num_arrived_msgs=UInt64(0))]
+        end
+        @test isempty(capacity_samples(SimulationResult(path, empty_id)))
+        @test_throws ArgumentError average_edge_capacity(SimulationResult(path, empty_id))
+        @test_throws ArgumentError SimulationResult(path, empty_id).average_traveling_time
     end
 end

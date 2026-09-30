@@ -9,8 +9,13 @@ using UUIDs: UUID, uuid4
 export SimulationID, SimulationConfig, SimulationResult,
        MinimalPaths, RandomWalk, LimitedVisibility, call_graphtraffic_rs, load_results
 
+export Observer, ObserverEdgeQueue, ObserverEdgeReceivedMessages,
+       ObserverEdgeCapacity, ObserverTotalMessages, Modifier, ModifierEdgeCapacity,
+       capacity_samples, average_edge_capacity
+
 const SimulationID = UUID
 
+include("instrumentation.jl")
 include("config.jl")
 include("protocol.jl")
 include("results.jl")

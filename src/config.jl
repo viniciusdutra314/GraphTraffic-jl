@@ -27,10 +27,14 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
     iterations::UInt64
     warmup::UInt64
     seed::UInt64
+    observers::Vector{Observer}
+    modifiers::Vector{Modifier}
     function SimulationConfig(; graph::AbstractGraph, routing::Routing=MinimalPaths(),
                               message_rate::Real, iterations::Integer,
                               warmup::Integer=0, seed::Integer=0,
-                              id::SimulationID=uuid4())
+                              id::SimulationID=uuid4(),
+                              observers::AbstractVector{<:Observer}=Observer[],
+                              modifiers::AbstractVector{<:Modifier}=Modifier[])
         validate_graph(graph)
         rate = Float64(message_rate)
         0 < rate <= 1 || throw(ArgumentError("message_rate must be in (0, 1]"))
@@ -39,6 +43,6 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
         seed >= 0 || throw(ArgumentError("seed must be nonnegative"))
         snapshot = copy(graph)
         new{typeof(snapshot),typeof(routing)}(id, snapshot, routing, rate,
-                                              iterations, warmup, seed)
+                                              iterations, warmup, seed, Observer[observers...], Modifier[modifiers...])
     end
 end
