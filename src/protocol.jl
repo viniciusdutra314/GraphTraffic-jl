@@ -26,11 +26,12 @@ function write_edgelist(path::AbstractString, graph::AbstractGraph)
 end
 
 function config_to_schema(config::SimulationConfig, graph_path::AbstractString)
-    (; uuid=string(config.id), graph_file_name=abspath(graph_path),
+    schema = (; uuid=string(config.id), graph_file_name=abspath(graph_path),
        routing_method=wire_routing(config.routing),
        message_generation=config.message_rate, max_iterations=config.iterations,
-       warm_up_iterations=config.warmup, random_seed=config.seed,
+       warm_up_iterations=config.warmup,
        modifiers=wire_modifier.(config.modifiers), observers=wire_observer.(config.observers))
+    isnothing(config.seed) ? schema : merge(schema, (; random_seed=config.seed))
 end
 
 wire_observer(::ObserverEdgeQueue) = (; type="ObserverEdgeQueue")

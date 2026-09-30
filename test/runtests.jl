@@ -26,6 +26,11 @@ Base.copy(graph::WeightedTestGraph) = WeightedTestGraph(copy(graph.inner), graph
 @testset "Configuration Validation" begin
     graph = path_graph(4)
     config = SimulationConfig(; graph, message_rate=0.2, iterations=20)
+    @test config.seed === nothing
+    @test !haskey(GraphTraffic.config_to_schema(config, "graph.edgelist"), :random_seed)
+    seeded = SimulationConfig(graph=path_graph(3), message_rate=0.1, iterations=10, seed=42)
+    @test seeded.seed === UInt64(42)
+    @test GraphTraffic.config_to_schema(seeded, "graph.edgelist").random_seed === UInt64(42)
     rem_edge!(graph, 1, 2)
     @test ne(config.graph) == 3
     @test_throws ArgumentError("weighted edges are unsupported") SimulationConfig(
@@ -221,6 +226,11 @@ end
             configs; output=joinpath(dir, "threads.hdf5"), threads=0)
         repeated = call_graphtraffic_rs(reverse(configs); output=joinpath(dir, "repeat.hdf5"), threads=1)
         @test all(results[id].average_delay == repeated[id].average_delay for id in keys(results))
+        unseeded = SimulationConfig(graph=cycle_graph(6), message_rate=0.1,
+                                    iterations=120, warmup=10)
+        unseeded_result = only(values(call_graphtraffic_rs([unseeded];
+            output=joinpath(dir, "unseeded.hdf5"), threads=1)))
+        @test unseeded_result.seed === nothing
     end
 end
 

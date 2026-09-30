@@ -40,7 +40,10 @@ function Base.getproperty(result::SimulationResult, name::Symbol)
     end
     name === :message_rate && return Float64(metadata(result)["message_generation"])
     name === :routing && return read_routing(metadata(result)["routing_method"])
-    name === :seed && return UInt64(metadata(result)["random_seed"])
+    if name === :seed
+        seed = get(metadata(result), "random_seed", nothing)
+        return isnothing(seed) ? nothing : UInt64(seed)
+    end
     getfield(result, name)
 end
 

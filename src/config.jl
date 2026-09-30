@@ -26,12 +26,12 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
     message_rate::Float64
     iterations::UInt64
     warmup::UInt64
-    seed::UInt64
+    seed::Union{Nothing,UInt64}
     observers::Vector{Observer}
     modifiers::Vector{Modifier}
     function SimulationConfig(; graph::AbstractGraph, routing::Routing=MinimalPaths(),
                               message_rate::Real, iterations::Integer,
-                              warmup::Integer=0, seed::Integer=0,
+                              warmup::Integer=0, seed::Union{Nothing,Integer}=nothing,
                               id::SimulationID=uuid4(),
                               observers::AbstractVector{<:Observer}=Observer[],
                               modifiers::AbstractVector{<:Modifier}=Modifier[])
@@ -40,7 +40,7 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
         0 < rate <= 1 || throw(ArgumentError("message_rate must be in (0, 1]"))
         iterations > 0 || throw(ArgumentError("iterations must be positive"))
         0 <= warmup < iterations || throw(ArgumentError("warmup must be in [0, iterations)"))
-        seed >= 0 || throw(ArgumentError("seed must be nonnegative"))
+        isnothing(seed) || seed >= 0 || throw(ArgumentError("seed must be nonnegative"))
         snapshot = copy(graph)
         new{typeof(snapshot),typeof(routing)}(id, snapshot, routing, rate,
                                               iterations, warmup, seed, Observer[observers...], Modifier[modifiers...])
