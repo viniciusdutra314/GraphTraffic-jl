@@ -103,6 +103,7 @@ function run_visualization(experiment::Type{<:Experiment};
                            overwrite::Bool=false)
     validate_num_threads(num_threads)
     check_output(figures_dir(directory), overwrite; figures=true)
+    mkpath(directory)
     visualization(experiment, CSV.read(analysis_file(directory), DataFrame);
                   directory=figures_dir(directory), num_threads)
     nothing
