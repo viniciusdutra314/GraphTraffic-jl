@@ -1,7 +1,11 @@
 using Test
 using GraphTraffic
+using GraphTraffic.orchestrator: ExperimentSpec, Experiment, run_simulation, run_analysis, run_visualization
+import GraphTraffic.orchestrator: simulation, analysis, visualization
 using Graphs
 using HDF5
+using DataFrames: AbstractDataFrame, DataFrame
+using CSV
 using GraphTraffic: JSON
 using UUIDs
 
@@ -17,6 +21,26 @@ Graphs.edges(graph::WeightedTestGraph) = edges(graph.inner)
 Graphs.vertices(graph::WeightedTestGraph) = vertices(graph.inner)
 Graphs.weights(graph::WeightedTestGraph) = fill(graph.weight, nv(graph), nv(graph))
 Base.copy(graph::WeightedTestGraph) = WeightedTestGraph(copy(graph.inner), graph.weight)
+
+# Record stage calls to verify the wrappers and optional cascading independently.
+struct TestExperiment <: ExperimentSpec
+    stages::Vector{Symbol}
+end
+function simulation(experiment::Experiment{TestExperiment})
+    push!(experiment.spec.stages, :simulation)
+    [SimulationConfig(graph=cycle_graph(4), message_rate=rate,
+                      iterations=40, warmup=5, seed=7) for rate in (0.1, 0.2)]
+end
+function analysis(experiment::Experiment{TestExperiment}, results)
+    push!(experiment.spec.stages, :analysis)
+    DataFrame([(; simulation_id=string(result.id), message_rate=result.message_rate,
+                average_delay=result.average_delay) for result in values(results)])
+end
+function visualization(experiment::Experiment{TestExperiment}, table::AbstractDataFrame)
+    push!(experiment.spec.stages, :visualization)
+    write(joinpath(experiment.directory, "plot-input.txt"), join(sort(table.message_rate), ","))
+    nothing
+end
 
 @testset "Configuration Validation" begin
     graph = path_graph(4)
@@ -50,6 +74,33 @@ Base.copy(graph::WeightedTestGraph) = WeightedTestGraph(copy(graph.inner), graph
     end
 end
 
+@testset "Orchestrator stages and artifacts" begin
+    for cascade in (false, true)
+        mktempdir() do directory
+            spec = TestExperiment(Symbol[])
+            experiment = Experiment(spec, directory, 2)
+            run_simulation(experiment, cascade)
+            if !cascade
+                @test spec.stages == [:simulation]
+                @test !isfile(joinpath(directory, "analysis.csv"))
+                run_analysis(experiment)
+                @test spec.stages == [:simulation, :analysis]
+                @test !isfile(joinpath(directory, "plot-input.txt"))
+                @test run_visualization(experiment) === nothing
+            end
+            @test spec.stages == [:simulation, :analysis, :visualization]
+            results = load_results(joinpath(directory, "results.hdf5"))
+            table = CSV.read(joinpath(directory, "analysis.csv"), DataFrame)
+            @test Set(keys(results)) == Set(UUID.(table.simulation_id))
+            @test Set(table.message_rate) == Set((0.1, 0.2))
+            @test read(joinpath(directory, "plot-input.txt"), String) == "0.1,0.2"
+            empty!(spec.stages)
+            run_analysis(experiment; cascate_pipeline=true)
+            @test spec.stages == [:analysis, :visualization]
+        end
+    end
+end
+
 @testset "Lazy metrics and missing observations" begin
     mktempdir() do dir
         path = joinpath(dir, "fixture.hdf5")
@@ -74,14 +125,12 @@ end
 
 
 @testset "Real simulator process and HDF5 contract" begin
-executable = ENV["GRAPHTRAFFIC_EXECUTABLE"]
-    simulator = Simulator(executable)
     mktempdir() do dir
         configs = [SimulationConfig(graph=cycle_graph(6), routing=routing,
                     message_rate=rate, iterations=120, warmup=10, seed=42)
                 for (routing, rate) in ((MinimalPaths(), 0.1), (RandomWalk(), 0.2), (LimitedVisibility(1), 0.3))]
         output = joinpath(dir, "results.hdf5")
-        results = simulate(simulator, configs; output, threads=2)
+        results = call_graphtraffic_rs(configs; output, threads=2)
         @test Set(keys(results)) == Set(config.id for config in configs)
         for config in configs
             result = results[config.id]
@@ -89,13 +138,13 @@ executable = ENV["GRAPHTRAFFIC_EXECUTABLE"]
             @test typeof(result.routing) == typeof(config.routing)
             @test result.seed == config.seed
         end
-        @test_throws ArgumentError("output already exists: $output") simulate(
-            simulator, configs; output)
-        @test_throws ArgumentError("duplicate simulation IDs") simulate(
-            simulator, [configs[1], configs[1]]; output=joinpath(dir, "duplicate.hdf5"))
-        @test_throws ArgumentError("threads must be positive") simulate(
-            simulator, configs; output=joinpath(dir, "threads.hdf5"), threads=0)
-        repeated = simulate(simulator, reverse(configs); output=joinpath(dir, "repeat.hdf5"), threads=1)
+        @test_throws ArgumentError("output already exists: $output") call_graphtraffic_rs(
+            configs; output)
+        @test_throws ArgumentError("duplicate simulation IDs") call_graphtraffic_rs(
+            [configs[1], configs[1]]; output=joinpath(dir, "duplicate.hdf5"))
+        @test_throws ArgumentError("threads must be positive") call_graphtraffic_rs(
+            configs; output=joinpath(dir, "threads.hdf5"), threads=0)
+        repeated = call_graphtraffic_rs(reverse(configs); output=joinpath(dir, "repeat.hdf5"), threads=1)
         @test all(results[id].average_delay == repeated[id].average_delay for id in keys(results))
     end
 end

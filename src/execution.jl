@@ -1,13 +1,11 @@
-struct Simulator
-    executable_path::String
-    function Simulator(executable_path::AbstractString)
-        resolved = isfile(executable_path) ? abspath(executable_path) : Sys.which(executable_path)
-        isnothing(resolved) && throw(ArgumentError("simulator executable not found: $executable_path"))
-        new(resolved)
+function graphtraffic_executable()
+    get(ENV, "GRAPHTRAFFIC_EXECUTABLE") do
+        error("GRAPHTRAFFIC_EXECUTABLE is not set")
     end
 end
 
-function simulate(simulator::Simulator, configs::AbstractVector{<:SimulationConfig};
+
+function call_graphtraffic_rs(configs::AbstractVector{<:SimulationConfig};
                   output::AbstractString, threads::Integer=max(1,Sys.CPU_THREADS ÷ 2 ), overwrite::Bool=false)
     isempty(configs) && throw(ArgumentError("configs must contain at least one simulation"))
     threads > 0 || throw(ArgumentError("threads must be positive"))
@@ -28,7 +26,7 @@ function simulate(simulator::Simulator, configs::AbstractVector{<:SimulationConf
             JSON.json(io, jsons_values)
         end
         temporary_output = joinpath(directory, "results.hdf5")
-        run(`$(simulator.executable_path) $json_path --output-file-hdf5 $temporary_output --threads $threads`)
+        run(`$(graphtraffic_executable()) $json_path --output-file-hdf5 $temporary_output --threads $threads`)
         mv(temporary_output, destination; force=overwrite)
     end
     load_results(destination)
