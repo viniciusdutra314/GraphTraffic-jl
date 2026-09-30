@@ -4,65 +4,106 @@ import CSV
 using DataFrames: DataFrame
 using ..GraphTraffic: SimulationID, SimulationResult, call_graphtraffic_rs, SimulationConfig, load_results
 
-export ExperimentSpec, Experiment, simulation, analysis, visualization,
+export Experiment, simulation, analysis, visualization,
        run_simulation, run_analysis, run_visualization
 
-abstract type ExperimentSpec end
-
-
-struct Experiment{S<:ExperimentSpec}
-    spec::S
-    directory::String
-    num_threads::Int
-end
-
+abstract type Experiment end
 
 """
     simulation(experiment::Experiment) -> Vector{SimulationConfig}
 
 Generate the simulation configurations for an experiment.
-Each `ExperimentSpec` must provide an implementation.
 """
 function simulation end
 
 """
-    analysis(experiment::Experiment,
-             results::Dict{SimulationID,SimulationResult}) -> DataFrame
+    analysis(experiment::Experiment, results; num_threads) -> DataFrame
 
-Analyze the simulation results for an experiment.
+Analyze results. The implementation decides how to use the requested thread count.
 """
 function analysis end
 
 """
-    visualization(experiment::Experiment, df::DataFrame) -> Nothing
+    visualization(experiment::Experiment, df; directory, num_threads) -> Nothing
 
-Generate the figures for an experiment.
+Write figures into `directory`. The implementation decides how to use the
+requested thread count; it need not parallelize plotting.
 """
 function visualization end
 
-results_file(experiment::Experiment)::String = joinpath(experiment.directory, "results.hdf5")
-analysis_file(experiment::Experiment)::String = joinpath(experiment.directory, "analysis.csv")
-figures_dir(experiment::Experiment)::String = joinpath(experiment.directory, "figures")
 
+function default_directory(experiment::Experiment)
+    project = Base.active_project()
+    isnothing(project) && throw(ArgumentError("no active Julia project; pass directory explicitly"))
+    joinpath(dirname(project), "results", string(nameof(typeof(experiment))))
+end
 
-function run_simulation(experiment::Experiment, cascate_pipeline::Bool=false)
+results_file(directory::AbstractString) = joinpath(directory, "results.hdf5")
+analysis_file(directory::AbstractString) = joinpath(directory, "analysis.csv")
+figures_dir(directory::AbstractString) = joinpath(directory, "figures")
+default_num_threads() = max(1, Sys.CPU_THREADS ÷ 2)
+
+function validate_num_threads(num_threads::Integer)
+    num_threads > 0 || throw(ArgumentError("num_threads must be positive"))
+    nothing
+end
+
+function check_output(path::AbstractString, overwrite::Bool; figures::Bool=false)
+    occupied = ispath(path) || islink(path)
+    if figures && isdir(path) && isempty(readdir(path))
+        occupied = false
+    end
+    occupied && !overwrite && throw(ArgumentError("output already exists: $path; pass overwrite=true to overwrite"))
+    nothing
+end
+
+function run_simulation(experiment::Experiment;
+                        directory::AbstractString=default_directory(experiment),
+                        num_threads::Integer=default_num_threads(),
+                        cascate_pipeline::Bool=false,
+                        overwrite::Bool=false)
+    validate_num_threads(num_threads)
+    check_output(results_file(directory), overwrite)
+    if cascate_pipeline
+        check_output(analysis_file(directory), overwrite)
+        check_output(figures_dir(directory), overwrite; figures=true)
+    end
     configs = simulation(experiment)
-    call_graphtraffic_rs(configs; output=results_file(experiment), threads=experiment.num_threads)
+    call_graphtraffic_rs(configs; output=results_file(directory), threads=num_threads, overwrite)
     if cascate_pipeline
-        run_analysis(experiment)
-        run_visualization(experiment)
+        run_analysis(experiment; directory, num_threads, cascate_pipeline=true, overwrite)
     end
+    nothing
 end
 
-function run_analysis(experiment::Experiment; cascate_pipeline::Bool=false)
-    df = analysis(experiment, load_results(results_file(experiment)))
-    CSV.write(analysis_file(experiment), df)
+
+function run_analysis(experiment::Experiment;
+                      directory::AbstractString=default_directory(experiment),
+                      num_threads::Integer=default_num_threads(),
+                      cascate_pipeline::Bool=false,
+                      overwrite::Bool=false)
+    validate_num_threads(num_threads)
+    check_output(analysis_file(directory), overwrite)
     if cascate_pipeline
-        run_visualization(experiment)
+        check_output(figures_dir(directory), overwrite; figures=true)
     end
+    df = analysis(experiment, load_results(results_file(directory)); num_threads)
+    CSV.write(analysis_file(directory), df)
+    if cascate_pipeline
+        run_visualization(experiment; directory, num_threads, overwrite)
+    end
+    nothing
 end
 
-function run_visualization(experiment::Experiment)
-    visualization(experiment, CSV.read(analysis_file(experiment), DataFrame))
+
+function run_visualization(experiment::Experiment;
+                           directory::AbstractString=default_directory(experiment),
+                           num_threads::Integer=default_num_threads(),
+                           overwrite::Bool=false)
+    validate_num_threads(num_threads)
+    check_output(figures_dir(directory), overwrite; figures=true)
+    visualization(experiment, CSV.read(analysis_file(directory), DataFrame);
+                  directory=figures_dir(directory), num_threads)
+    nothing
 end
 end

@@ -1,6 +1,6 @@
 using Test
 using GraphTraffic
-using GraphTraffic.orchestrator: ExperimentSpec, Experiment, run_simulation, run_analysis, run_visualization
+using GraphTraffic.orchestrator: Experiment, run_simulation, run_analysis, run_visualization
 import GraphTraffic.orchestrator: simulation, analysis, visualization
 using Graphs
 using HDF5
@@ -22,25 +22,6 @@ Graphs.vertices(graph::WeightedTestGraph) = vertices(graph.inner)
 Graphs.weights(graph::WeightedTestGraph) = fill(graph.weight, nv(graph), nv(graph))
 Base.copy(graph::WeightedTestGraph) = WeightedTestGraph(copy(graph.inner), graph.weight)
 
-# Record stage calls to verify the wrappers and optional cascading independently.
-struct TestExperiment <: ExperimentSpec
-    stages::Vector{Symbol}
-end
-function simulation(experiment::Experiment{TestExperiment})
-    push!(experiment.spec.stages, :simulation)
-    [SimulationConfig(graph=cycle_graph(4), message_rate=rate,
-                      iterations=40, warmup=5, seed=7) for rate in (0.1, 0.2)]
-end
-function analysis(experiment::Experiment{TestExperiment}, results)
-    push!(experiment.spec.stages, :analysis)
-    DataFrame([(; simulation_id=string(result.id), message_rate=result.message_rate,
-                average_delay=result.average_delay) for result in values(results)])
-end
-function visualization(experiment::Experiment{TestExperiment}, table::AbstractDataFrame)
-    push!(experiment.spec.stages, :visualization)
-    write(joinpath(experiment.directory, "plot-input.txt"), join(sort(table.message_rate), ","))
-    nothing
-end
 
 @testset "Configuration Validation" begin
     graph = path_graph(4)
@@ -74,30 +55,118 @@ end
     end
 end
 
+# Record stage calls to verify the wrappers and optional cascading independently.
+struct TestExperiment <: Experiment
+    stages::Vector{Symbol}
+    requested_threads::Vector{Int}
+end
+function simulation(experiment::TestExperiment)
+    push!(experiment.stages, :simulation)
+    [SimulationConfig(graph=cycle_graph(4), message_rate=rate,
+                      iterations=40, warmup=5, seed=7) for rate in (0.1, 0.2)]
+end
+function analysis(experiment::TestExperiment, results; num_threads)
+    push!(experiment.requested_threads, num_threads)
+    push!(experiment.stages, :analysis)
+    DataFrame([(; simulation_id=string(result.id), message_rate=result.message_rate,
+                average_delay=result.average_delay) for result in values(results)])
+end
+function visualization(experiment::TestExperiment, table::AbstractDataFrame; directory, num_threads)
+    push!(experiment.requested_threads, num_threads)
+    mkpath(directory)
+    push!(experiment.stages, :visualization)
+    write(joinpath(directory, "plot-input.txt"), join(sort(table.message_rate), ","))
+    nothing
+end
+
+
 @testset "Orchestrator stages and artifacts" begin
     for cascade in (false, true)
         mktempdir() do directory
-            spec = TestExperiment(Symbol[])
-            experiment = Experiment(spec, directory, 2)
-            run_simulation(experiment, cascade)
+            experiment = TestExperiment(Symbol[], Int[])
+            run_simulation(experiment; directory, num_threads=2, cascate_pipeline=cascade)
             if !cascade
-                @test spec.stages == [:simulation]
+                @test experiment.stages == [:simulation]
                 @test !isfile(joinpath(directory, "analysis.csv"))
-                run_analysis(experiment)
-                @test spec.stages == [:simulation, :analysis]
-                @test !isfile(joinpath(directory, "plot-input.txt"))
-                @test run_visualization(experiment) === nothing
+                run_analysis(experiment; directory, num_threads=2)
+                @test experiment.stages == [:simulation, :analysis]
+                @test !isfile(joinpath(directory, "figures", "plot-input.txt"))
+                @test run_visualization(experiment; directory, num_threads=2) === nothing
             end
-            @test spec.stages == [:simulation, :analysis, :visualization]
+            @test experiment.stages == [:simulation, :analysis, :visualization]
             results = load_results(joinpath(directory, "results.hdf5"))
             table = CSV.read(joinpath(directory, "analysis.csv"), DataFrame)
             @test Set(keys(results)) == Set(UUID.(table.simulation_id))
             @test Set(table.message_rate) == Set((0.1, 0.2))
-            @test read(joinpath(directory, "plot-input.txt"), String) == "0.1,0.2"
-            empty!(spec.stages)
-            run_analysis(experiment; cascate_pipeline=true)
-            @test spec.stages == [:analysis, :visualization]
+            @test read(joinpath(directory, "figures", "plot-input.txt"), String) == "0.1,0.2"
+            @test experiment.requested_threads == [2, 2]
+            empty!(experiment.stages)
+            run_analysis(experiment; directory, num_threads=3, cascate_pipeline=true, overwrite=true)
+            @test experiment.stages == [:analysis, :visualization]
+            @test experiment.requested_threads == [2, 2, 3, 3]
         end
+    end
+end
+
+@testset "Explicit overwrite policy" begin
+    mktempdir() do directory
+        experiment = TestExperiment(Symbol[], Int[])
+        run_simulation(experiment; directory, num_threads=1, cascate_pipeline=true)
+        paths = [joinpath(directory, "results.hdf5"), joinpath(directory, "analysis.csv"),
+                 joinpath(directory, "figures", "plot-input.txt")]
+        original = read.(paths)
+        for runner in (run_simulation, run_analysis, run_visualization)
+            empty!(experiment.stages)
+            @test_throws ArgumentError runner(experiment; directory, num_threads=1)
+            @test isempty(experiment.stages)
+            @test read.(paths) == original
+        end
+        old_ids = Set(keys(load_results(paths[1])))
+        @test run_simulation(experiment; directory, num_threads=1, overwrite=true) === nothing
+        @test Set(keys(load_results(paths[1]))) != old_ids
+        @test read.(paths[2:3]) == original[2:3]
+        write(paths[2], "old table")
+        @test run_analysis(experiment; directory, num_threads=1, overwrite=true) === nothing
+        @test Set(UUID.(CSV.read(paths[2], DataFrame).simulation_id)) == Set(keys(load_results(paths[1])))
+        write(paths[3], "old figure")
+        @test run_visualization(experiment; directory, num_threads=1, overwrite=true) === nothing
+        @test read(paths[3], String) == "0.1,0.2"
+        empty!(experiment.stages)
+        @test run_simulation(experiment; directory, num_threads=1,
+                             cascate_pipeline=true, overwrite=true) === nothing
+        @test experiment.stages == [:simulation, :analysis, :visualization]
+        @test Set(UUID.(CSV.read(paths[2], DataFrame).simulation_id)) == Set(keys(load_results(paths[1])))
+    end
+
+    # A downstream collision must be detected before an earlier stage writes.
+    for existing in ("analysis.csv", joinpath("figures", "old.svg"))
+        mktempdir() do directory
+            path = joinpath(directory, existing)
+            mkpath(dirname(path))
+            write(path, "keep")
+            experiment = TestExperiment(Symbol[], Int[])
+            @test_throws ArgumentError run_simulation(experiment; directory,
+                num_threads=1, cascate_pipeline=true)
+            @test isempty(experiment.stages)
+            @test !isfile(joinpath(directory, "results.hdf5"))
+            @test read(path, String) == "keep"
+            if startswith(existing, "figures")
+                run_simulation(experiment; directory, num_threads=1)
+                empty!(experiment.stages)
+                @test_throws ArgumentError run_analysis(experiment; directory,
+                    num_threads=1, cascate_pipeline=true)
+                @test isempty(experiment.stages)
+                @test !isfile(joinpath(directory, "analysis.csv"))
+                @test read(path, String) == "keep"
+            end
+        end
+    end
+    mktempdir() do directory
+        mkpath(joinpath(directory, "figures"))
+        experiment = TestExperiment(Symbol[], Int[])
+        @test run_simulation(experiment; directory, num_threads=1,
+                             cascate_pipeline=true) === nothing
+        @test isfile(joinpath(directory, "figures", "plot-input.txt"))
     end
 end
 
