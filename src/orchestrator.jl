@@ -2,7 +2,7 @@ module orchestrator
 
 import CSV
 using DataFrames: DataFrame
-using ..GraphTraffic: SimulationID, SimulationResult, call_graphtraffic_rs, SimulationConfig, load_results
+using ..GraphTraffic: load_results
 
 export Experiment, simulation, analysis, visualization,
        run_simulation, run_analysis, run_visualization
@@ -11,9 +11,11 @@ export Experiment, simulation, analysis, visualization,
 abstract type Experiment end
 
 """
-    simulation(experiment::Type{<:Experiment}) -> Vector{SimulationConfig}
+    simulation(experiment::Type{<:Experiment}; output, num_threads, overwrite) -> Nothing
 
-Generate the simulation configurations for an experiment.
+Execute the experiment's simulation stage, writing results to `output`.
+The implementation may invoke the simulator more than once and inspect earlier
+results before building later simulation configurations.
 """
 function simulation end
 
@@ -58,19 +60,21 @@ function check_output(path::AbstractString, overwrite::Bool; figures::Bool=false
     nothing
 end
 
+"""Validate experiment outputs, execute its simulation stage, and optionally run later stages."""
 function run_simulation(experiment::Type{<:Experiment};
                         directory::AbstractString=default_directory(experiment),
                         num_threads::Integer=default_num_threads(),
                         cascate_pipeline::Bool=false,
                         overwrite::Bool=false)
     validate_num_threads(num_threads)
-    check_output(results_file(directory), overwrite)
+    output = results_file(directory)
+    check_output(output, overwrite)
     if cascate_pipeline
         check_output(analysis_file(directory), overwrite)
         check_output(figures_dir(directory), overwrite; figures=true)
     end
-    configs = simulation(experiment)
-    call_graphtraffic_rs(configs; output=results_file(directory), threads=num_threads, overwrite)
+    simulation(experiment; output, num_threads, overwrite)
+    isfile(output) || throw(ArgumentError("simulation did not create output: $output"))
     if cascate_pipeline
         run_analysis(experiment; directory, num_threads, cascate_pipeline=true, overwrite)
     end

@@ -18,8 +18,10 @@ function call_graphtraffic_rs(configs::AbstractVector{<:SimulationConfig};
     mktempdir(dirname(destination)) do directory
         jsons_values = map(configs) do config
             graph_path = joinpath(directory, "$(config.id).edgelist")
-            write_edgelist(graph_path, config.graph)
-            config_to_schema(config, graph_path)
+            capacity_path = joinpath(directory, "$(config.id).capacity")
+            write_edgelist(graph_path, config.graph;
+                           capacity_path, initial_capacity=config.initial_capacity)
+            config_to_schema(config, graph_path; capacity_path)
         end
         json_path = joinpath(directory, "config.json")
         open(json_path, "w") do io
@@ -31,4 +33,3 @@ function call_graphtraffic_rs(configs::AbstractVector{<:SimulationConfig};
     end
     load_results(destination)
 end
-

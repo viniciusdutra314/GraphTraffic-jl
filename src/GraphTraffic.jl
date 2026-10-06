@@ -1,17 +1,19 @@
 module GraphTraffic
 
 using Graphs
+using Random
 using HDF5: h5open
 using JSON
 using Statistics: mean
 using UUIDs: UUID, uuid4
 
 export SimulationID, SimulationConfig, SimulationResult,
-       MinimalPaths, RandomWalk, LimitedVisibility, call_graphtraffic_rs, load_results
+       MinimalPaths, RandomWalk, LimitedVisibility, call_graphtraffic_rs, load_results,
+       balanced_initial_capacity
 
 export Observer, ObserverEdgeQueue, ObserverEdgeReceivedMessages,
        ObserverEdgeCapacity, ObserverTotalMessages, Modifier, ModifierEdgeCapacity,
-       capacity_samples, average_edge_capacity
+       capacity_samples, average_edge_capacity, total_edge_capacity
 
 const SimulationID = UUID
 
