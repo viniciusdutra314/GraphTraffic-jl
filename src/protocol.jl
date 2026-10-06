@@ -12,24 +12,30 @@ function read_routing(value)
     throw(ArgumentError("unsupported routing in simulator output: $value"))
 end
 
-function write_edgelist(path::AbstractString, graph::AbstractGraph)
+function write_edgelist(path::AbstractString, graph::AbstractGraph;
+                        capacity_path::AbstractString,
+                        initial_capacity::AbstractDict{<:Edge,<:Unsigned})
     validate_graph(graph)
     #make rust happy about graph indexing [0,V)
     indices = Dict(v => i - 1 for (i, v) in enumerate(vertices(graph)))
     open(path, "w") do io
-        println(io, nv(graph))
-        println(io, ne(graph))
-        for edge in edges(graph)
-            println(io, indices[src(edge)], ' ', indices[dst(edge)])
+        open(capacity_path, "w") do capacity_io
+            println(io, nv(graph))
+            println(io, ne(graph))
+            for edge in edges(graph)
+                println(io, indices[src(edge)], ' ', indices[dst(edge)])
+                println(capacity_io, initial_capacity[canonical_edge(edge)])
+            end
         end
     end
 end
 
-function config_to_schema(config::SimulationConfig, graph_path::AbstractString)
+function config_to_schema(config::SimulationConfig, graph_path::AbstractString;
+                          capacity_path::AbstractString)
     schema = (; uuid=string(config.id), graph_file_name=abspath(graph_path),
        routing_method=wire_routing(config.routing),
        message_generation=config.message_rate, max_iterations=config.iterations,
-       warm_up_iterations=config.warmup,
+       warm_up_iterations=config.warmup, initial_capacity=abspath(capacity_path),
        modifiers=wire_modifier.(config.modifiers), observers=wire_observer.(config.observers))
     isnothing(config.seed) ? schema : merge(schema, (; random_seed=config.seed))
 end

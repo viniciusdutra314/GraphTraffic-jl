@@ -8,10 +8,50 @@ using DataFrames: AbstractDataFrame, DataFrame
 using CSV
 using GraphTraffic: JSON
 using UUIDs
+using Random
+
+unit_capacity(graph) = balanced_initial_capacity(graph, ne(graph))
+unit_config(; graph, kwargs...) = SimulationConfig(; graph, initial_capacity=unit_capacity(graph), kwargs...)
 
 struct WeightedTestGraph <: AbstractGraph{Int}
     inner::SimpleGraph{Int}
     weight::Int
+end
+
+@testset "Initial capacity maps" begin
+    graph = path_graph(4)
+    manual = Dict(Edge(2, 1) => UInt(7), Edge(2, 3) => UInt(2), Edge(4, 3) => UInt(9))
+    config = SimulationConfig(; graph, initial_capacity=manual, message_rate=0.2, iterations=1)
+    @test config.initial_capacity[Edge(1, 2)] == 7
+    manual[Edge(2, 1)] = UInt(100)
+    @test config.initial_capacity[Edge(1, 2)] == 7
+    @test_throws ArgumentError("initial_capacity edges must match graph edges") SimulationConfig(; graph, initial_capacity=Dict(Edge(1, 2) => UInt(1)), message_rate=0.2, iterations=1)
+    @test_throws ArgumentError("initial_capacity edges must match graph edges") SimulationConfig(; graph, initial_capacity=merge(manual, Dict(Edge(1, 4) => UInt(1))), message_rate=0.2, iterations=1)
+    @test_throws ArgumentError("initial_capacity contains duplicate undirected edges") SimulationConfig(; graph, initial_capacity=merge(manual, Dict(Edge(1, 2) => UInt(1))), message_rate=0.2, iterations=1)
+    @test_throws ArgumentError("initial_capacity values must be positive and fit UInt") SimulationConfig(; graph, initial_capacity=merge(manual, Dict(Edge(2, 3) => UInt(0))), message_rate=0.2, iterations=1)
+    too_large = Dict(edge => UInt128(value) for (edge, value) in manual)
+    too_large[Edge(2, 3)] = UInt128(typemax(UInt)) + 1
+    @test_throws ArgumentError("initial_capacity values must be positive and fit UInt") SimulationConfig(; graph, initial_capacity=too_large, message_rate=0.2, iterations=1)
+    for total in (3, 4, 8, 20)
+        capacities = balanced_initial_capacity(graph, total; rng=MersenneTwister(42))
+        @test sum(values(capacities)) == total
+        @test maximum(values(capacities)) - minimum(values(capacities)) <= 1
+        @test capacities == balanced_initial_capacity(graph, total; rng=MersenneTwister(42))
+    end
+    @test_throws ArgumentError("total_capacity must be at least the number of edges") balanced_initial_capacity(graph, 2)
+    @test_throws ArgumentError("total_capacity must be positive") balanced_initial_capacity(graph, 0)
+    @test_throws ArgumentError("graph must contain an edge") balanced_initial_capacity(SimpleGraph(1), 1)
+    mktempdir() do dir
+        graph_path = joinpath(dir, "graph.edgelist")
+        capacity_path = joinpath(dir, "capacity.txt")
+        GraphTraffic.write_edgelist(graph_path, config.graph;
+            capacity_path, initial_capacity=config.initial_capacity)
+        edge_lines = readlines(graph_path)[3:end]
+        capacity_lines = parse.(Int, readlines(capacity_path))
+        expected = Dict("0 1" => 7, "1 2" => 2, "2 3" => 9)
+        @test Dict(zip(edge_lines, capacity_lines)) == expected
+        @test GraphTraffic.config_to_schema(config, graph_path; capacity_path).initial_capacity == capacity_path
+    end
 end
 Graphs.nv(graph::WeightedTestGraph) = nv(graph.inner)
 Graphs.ne(graph::WeightedTestGraph) = ne(graph.inner)
@@ -25,38 +65,41 @@ Base.copy(graph::WeightedTestGraph) = WeightedTestGraph(copy(graph.inner), graph
 
 @testset "Configuration Validation" begin
     graph = path_graph(4)
-    config = SimulationConfig(; graph, message_rate=0.2, iterations=20)
+    config = unit_config(; graph, message_rate=0.2, iterations=20)
     @test config.seed === nothing
-    @test !haskey(GraphTraffic.config_to_schema(config, "graph.edgelist"), :random_seed)
-    seeded = SimulationConfig(graph=path_graph(3), message_rate=0.1, iterations=10, seed=42)
+    @test_throws r"^UndefKeywordError: keyword argument `initial_capacity` not assigned$" SimulationConfig(; graph, message_rate=0.2, iterations=20)
+    @test !haskey(GraphTraffic.config_to_schema(config, "graph.edgelist"; capacity_path="capacity.txt"), :random_seed)
+    seeded = unit_config(graph=path_graph(3), message_rate=0.1, iterations=10, seed=42)
     @test seeded.seed === UInt64(42)
-    @test GraphTraffic.config_to_schema(seeded, "graph.edgelist").random_seed === UInt64(42)
+    @test GraphTraffic.config_to_schema(seeded, "graph.edgelist"; capacity_path="capacity.txt").random_seed === UInt64(42)
     rem_edge!(graph, 1, 2)
     @test ne(config.graph) == 3
     @test_throws ArgumentError("weighted edges are unsupported") SimulationConfig(
-        graph=WeightedTestGraph(path_graph(3), 2), message_rate=0.1, iterations=10)
-    wrapped = SimulationConfig(graph=WeightedTestGraph(path_graph(3), 1), message_rate=0.1, iterations=10)
+        graph=WeightedTestGraph(path_graph(3), 2), initial_capacity=Dict{Edge{Int},UInt}(), message_rate=0.1, iterations=10)
+    wrapped = unit_config(graph=WeightedTestGraph(path_graph(3), 1), message_rate=0.1, iterations=10)
     @test wrapped.graph isa WeightedTestGraph
     for rate in (0, -0.1, 1.1, NaN, Inf)
-        @test_throws ArgumentError("message_rate must be in (0, 1]") SimulationConfig(
+        @test_throws ArgumentError("message_rate must be in (0, 1]") unit_config(
             graph=path_graph(3), message_rate=rate, iterations=10)
     end
     @test_throws ArgumentError("the simulator requires an undirected graph") SimulationConfig(
-        graph=SimpleDiGraph(3), message_rate=0.1, iterations=10)
+        graph=SimpleDiGraph(3), initial_capacity=Dict{Edge{Int},UInt}(), message_rate=0.1, iterations=10)
     @test_throws ArgumentError("the simulator requires a connected graph") SimulationConfig(
-        graph=SimpleGraph(3), message_rate=0.1, iterations=10)
-    @test_throws ArgumentError("iterations must be positive") SimulationConfig(
+        graph=SimpleGraph(3), initial_capacity=Dict{Edge{Int},UInt}(), message_rate=0.1, iterations=10)
+    @test_throws ArgumentError("iterations must be positive") unit_config(
         graph=path_graph(3), message_rate=0.1, iterations=0)
-    @test_throws ArgumentError("warmup must be in [0, iterations)") SimulationConfig(
+    @test_throws ArgumentError("warmup must be in [0, iterations)") unit_config(
         graph=path_graph(3), message_rate=0.1, iterations=10, warmup=10)
-    @test_throws ArgumentError("seed must be nonnegative") SimulationConfig(
+    @test_throws ArgumentError("seed must be nonnegative") unit_config(
         graph=path_graph(3), message_rate=0.1, iterations=10, seed=-1)
     @test_throws ArgumentError("visibility must be nonnegative") LimitedVisibility(-1)
     @test LimitedVisibility(0).radius == 0
     mktempdir() do dir
         path = joinpath(dir, "graph.edgelist")
-        GraphTraffic.write_edgelist(path, config.graph)
+        GraphTraffic.write_edgelist(path, config.graph;
+            capacity_path=joinpath(dir, "capacity.txt"), initial_capacity=config.initial_capacity)
         @test readlines(path) == ["4", "3", "0 1", "1 2", "2 3"]
+        @test readlines(joinpath(dir, "capacity.txt")) == ["1", "1", "1"]
     end
 end
 
@@ -71,10 +114,14 @@ function reset_test_experiment()
     empty!(test_requested_threads)
     TestExperiment
 end
-function simulation(experiment::Type{TestExperiment})
+function simulation(experiment::Type{TestExperiment};
+                    output::AbstractString, num_threads::Integer, overwrite::Bool=false)
     push!(test_stages, :simulation)
-    [SimulationConfig(graph=cycle_graph(4), message_rate=rate,
-                      iterations=40, warmup=5, seed=7) for rate in (0.1, 0.2)]
+    push!(test_requested_threads, num_threads)
+    configs = [unit_config(graph=cycle_graph(4), message_rate=rate,
+                           iterations=40, warmup=5, seed=7) for rate in (0.1, 0.2)]
+    call_graphtraffic_rs(configs; output, threads=num_threads, overwrite)
+    nothing
 end
 function analysis(experiment::Type{TestExperiment}, results; num_threads)
     push!(test_requested_threads, num_threads)
@@ -110,11 +157,11 @@ end
             @test Set(keys(results)) == Set(UUID.(table.simulation_id))
             @test Set(table.message_rate) == Set((0.1, 0.2))
             @test read(joinpath(directory, "figures", "plot-input.txt"), String) == "0.1,0.2"
-            @test test_requested_threads == [2, 2]
+            @test test_requested_threads == [2, 2, 2]
             empty!(test_stages)
             run_analysis(experiment; directory, num_threads=3, cascate_pipeline=true, overwrite=true)
             @test test_stages == [:analysis, :visualization]
-            @test test_requested_threads == [2, 2, 3, 3]
+            @test test_requested_threads == [2, 2, 2, 3, 3]
         end
     end
 end
@@ -126,9 +173,10 @@ end
         paths = [joinpath(directory, "results.hdf5"), joinpath(directory, "analysis.csv"),
                  joinpath(directory, "figures", "plot-input.txt")]
         original = read.(paths)
-        for runner in (run_simulation, run_analysis, run_visualization)
+        for (runner, output) in zip((run_simulation, run_analysis, run_visualization),
+                                    (paths[1], paths[2], joinpath(directory, "figures")))
             empty!(test_stages)
-            @test_throws ArgumentError runner(experiment; directory, num_threads=1)
+            @test_throws ArgumentError("output already exists: $output; pass overwrite=true to overwrite") runner(experiment; directory, num_threads=1)
             @test isempty(test_stages)
             @test read.(paths) == original
         end
@@ -156,7 +204,8 @@ end
             mkpath(dirname(path))
             write(path, "keep")
             experiment = reset_test_experiment()
-            @test_throws ArgumentError run_simulation(experiment; directory,
+            output = existing == "analysis.csv" ? path : joinpath(directory, "figures")
+            @test_throws ArgumentError("output already exists: $output; pass overwrite=true to overwrite") run_simulation(experiment; directory,
                 num_threads=1, cascate_pipeline=true)
             @test isempty(test_stages)
             @test !isfile(joinpath(directory, "results.hdf5"))
@@ -164,7 +213,8 @@ end
             if startswith(existing, "figures")
                 run_simulation(experiment; directory, num_threads=1)
                 empty!(test_stages)
-                @test_throws ArgumentError run_analysis(experiment; directory,
+                output = joinpath(directory, "figures")
+                @test_throws ArgumentError("output already exists: $output; pass overwrite=true to overwrite") run_analysis(experiment; directory,
                     num_threads=1, cascate_pipeline=true)
                 @test isempty(test_stages)
                 @test !isfile(joinpath(directory, "analysis.csv"))
@@ -206,7 +256,7 @@ end
 
 @testset "Real simulator process and HDF5 contract" begin
     mktempdir() do dir
-        configs = [SimulationConfig(graph=cycle_graph(6), routing=routing,
+        configs = [unit_config(graph=cycle_graph(6), routing=routing,
                     message_rate=rate, iterations=120, warmup=10, seed=42)
                 for (routing, rate) in ((MinimalPaths(), 0.1), (RandomWalk(), 0.2), (LimitedVisibility(1), 0.3))]
         output = joinpath(dir, "results.hdf5")
@@ -226,11 +276,37 @@ end
             configs; output=joinpath(dir, "threads.hdf5"), threads=0)
         repeated = call_graphtraffic_rs(reverse(configs); output=joinpath(dir, "repeat.hdf5"), threads=1)
         @test all(results[id].average_delay == repeated[id].average_delay for id in keys(results))
-        unseeded = SimulationConfig(graph=cycle_graph(6), message_rate=0.1,
+        unseeded = unit_config(graph=cycle_graph(6), message_rate=0.1,
                                     iterations=120, warmup=10)
         unseeded_result = only(values(call_graphtraffic_rs([unseeded];
             output=joinpath(dir, "unseeded.hdf5"), threads=1)))
         @test unseeded_result.seed === nothing
+    end
+end
+
+@testset "Initial capacities reach the Rust simulation" begin
+    graph = path_graph(4)
+    manual = Dict(Edge(2, 1) => UInt(7), Edge(2, 3) => UInt(2), Edge(4, 3) => UInt(9))
+    balanced = balanced_initial_capacity(graph, 11; rng=MersenneTwister(19))
+    configs = [SimulationConfig(; graph, initial_capacity=capacities,
+        message_rate=0.2, iterations=1, observers=[ObserverEdgeCapacity()])
+        for capacities in (manual, balanced)]
+    mktempdir() do dir
+        results = call_graphtraffic_rs(configs; output=joinpath(dir, "capacities.hdf5"), threads=1)
+        for (config, supplied) in zip(configs, (manual, balanced))
+            result = results[config.id]
+            @test haskey(GraphTraffic.metadata(result), "initial_capacity")
+            sample = only(capacity_samples(result))
+            @test sample.iteration == 1
+            h5open(result.path, "r") do file
+                rows = read(file, "graphs/$(config.id)/edgelist")
+                for row in rows
+                    edge = Edge(Int(row.source) + 1, Int(row.target) + 1)
+                    expected = get(supplied, edge, get(supplied, Edge(dst(edge), src(edge)), nothing))
+                    @test sample.capacities[Int(row.edge_id) + 1] == expected
+                end
+            end
+        end
     end
 end
 
@@ -245,15 +321,15 @@ end
     observers = Observer[ObserverEdgeQueue(), ObserverEdgeReceivedMessages(),
                          ObserverEdgeCapacity(update_interval=5), ObserverTotalMessages()]
     modifiers = [ModifierEdgeCapacity(free_flow_rate=0.9, free_flow_sampling_time=5)]
-    config = SimulationConfig(graph=cycle_graph(4), message_rate=0.2,
+    config = unit_config(graph=cycle_graph(4), message_rate=0.2,
         iterations=40, warmup=10, observers=observers, modifiers=modifiers)
     empty!(observers)
     empty!(modifiers)
     @test length(config.observers) == 4
     @test length(config.modifiers) == 1
-    plain = SimulationConfig(graph=cycle_graph(4), message_rate=0.2, iterations=40, warmup=10)
+    plain = unit_config(graph=cycle_graph(4), message_rate=0.2, iterations=40, warmup=10)
     @test isempty(plain.observers) && isempty(plain.modifiers)
-    schema = GraphTraffic.config_to_schema(config, "graph.edgelist")
+    schema = GraphTraffic.config_to_schema(config, "graph.edgelist"; capacity_path="capacity.txt")
     @test schema.observers == [(type="ObserverEdgeQueue",),
         (type="ObserverEdgeReceivedMessages",),
         (type="ObserverEdgeCapacity", update_interval=UInt64(5)), (type="ObserverTotalMessages",)]
@@ -299,6 +375,13 @@ end
         @test getproperty.(capacity_samples(result), :iteration) == [2, 10]
         @test average_edge_capacity(result) == 4
         @test average_edge_capacity(result; over=:final) == 10
+        @test total_edge_capacity(result) == UInt(20)
+        overflow_id = uuid4()
+        h5open(path, "r+") do file
+            group = create_group(file, "simulations_results/$overflow_id")
+            group["edges_attributes"] = [(capacity=typemax(UInt64),), (capacity=UInt64(1),)]
+        end
+        @test_throws ArgumentError("total edge capacity does not fit UInt") total_edge_capacity(SimulationResult(path, overflow_id))
         empty_id = uuid4()
         h5open(path, "r+") do file
             group = create_group(file, "simulations_results/$empty_id")
@@ -306,7 +389,7 @@ end
             group["vertices_attributes"] = [(total_traveling_time=UInt64(0), num_arrived_msgs=UInt64(0))]
         end
         @test isempty(capacity_samples(SimulationResult(path, empty_id)))
-        @test_throws ArgumentError average_edge_capacity(SimulationResult(path, empty_id))
-        @test_throws ArgumentError SimulationResult(path, empty_id).average_traveling_time
+        @test_throws ArgumentError("no capacity samples after warmup") average_edge_capacity(SimulationResult(path, empty_id))
+        @test_throws ArgumentError("no arrived packets to average") SimulationResult(path, empty_id).average_traveling_time
     end
 end

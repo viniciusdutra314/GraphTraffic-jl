@@ -68,6 +68,15 @@ function capacity_samples(result::SimulationResult)::Vector{NamedTuple{(:iterati
     end
 end
 
+"""Return the exact sum of the final edge capacities, suitable for a new initial-capacity map."""
+function total_edge_capacity(result::SimulationResult)::UInt
+    rows = read_dataset(result, "edges_attributes")
+    isempty(rows) && throw(ArgumentError("no edges to total"))
+    total = sum((BigInt(row.capacity) for row in rows); init=big(0))
+    total <= typemax(UInt) || throw(ArgumentError("total edge capacity does not fit UInt"))
+    UInt(total)
+end
+
 function average_edge_capacity(result::SimulationResult; over::Symbol=:samples)::Float64
     if over === :final
         capacities = [row.capacity for row in read_dataset(result, "edges_attributes")]
