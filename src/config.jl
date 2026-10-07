@@ -66,6 +66,12 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
     end
 end
 
+function uniform_initial_capacity(graph::AbstractGraph, capacity_per_edge::Integer)
+    0 < capacity_per_edge <= typemax(UInt) ||
+        throw(ArgumentError("capacity_per_edge must be positive and fit UInt"))
+    Dict{Edge{Int},UInt}(canonical_edge(edge) => UInt(capacity_per_edge) for edge in edges(graph))
+end
+
 """Distribute a positive total capacity as evenly as possible across graph edges."""
 function balanced_initial_capacity(graph::AbstractGraph, total_capacity::Integer;
                                    rng::Random.AbstractRNG=Random.default_rng())

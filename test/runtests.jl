@@ -10,7 +10,7 @@ using GraphTraffic: JSON
 using UUIDs
 using Random
 
-unit_capacity(graph) = balanced_initial_capacity(graph, ne(graph))
+unit_capacity(graph) = uniform_initial_capacity(graph, 1)
 unit_config(; graph, kwargs...) = SimulationConfig(; graph, initial_capacity=unit_capacity(graph), kwargs...)
 
 @testset "Limited-visibility expected routes" begin
@@ -82,6 +82,22 @@ end
 struct WeightedTestGraph <: AbstractGraph{Int}
     inner::SimpleGraph{Int}
     weight::Int
+end
+
+@testset "Uniform initial capacity" begin
+    # 1 -- 2 -- 3: both edges receive exactly the requested capacity.
+    graph = path_graph(3)
+    capacities = uniform_initial_capacity(graph, 3)
+    @test capacities == Dict(Edge(1, 2) => UInt(3), Edge(2, 3) => UInt(3))
+    config = SimulationConfig(; graph, initial_capacity=capacities,
+                              message_rate=0.1, iterations=10)
+    @test config.initial_capacity == capacities
+    @test uniform_initial_capacity(graph, UInt128(3)) == capacities
+    @test uniform_initial_capacity(graph, typemax(UInt)) ==
+          Dict(Edge(1, 2) => typemax(UInt), Edge(2, 3) => typemax(UInt))
+    for capacity in (0, -1, big(typemax(UInt)) + 1)
+        @test_throws ArgumentError("capacity_per_edge must be positive and fit UInt") uniform_initial_capacity(graph, capacity)
+    end
 end
 
 @testset "Initial capacity maps" begin
