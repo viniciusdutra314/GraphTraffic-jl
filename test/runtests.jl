@@ -321,19 +321,36 @@ end
         id = uuid4()
         result = SimulationResult(path, id) # The file does not exist yet.
         @test result.id == id
-        rows = [(total_traveling_time=UInt64(8), total_distance=UInt64(4), num_arrived_msgs=UInt64(2)),
-                (total_traveling_time=UInt64(9), total_distance=UInt64(3), num_arrived_msgs=UInt64(3)),
-                (total_traveling_time=UInt64(0), total_distance=UInt64(0), num_arrived_msgs=UInt64(0))]
+        rows = [(total_traveling_time=UInt64(8), total_distance=UInt64(4),
+                 num_arrived_msgs=UInt64(2), num_messages_generated=UInt64(4)),
+                (total_traveling_time=UInt64(9), total_distance=UInt64(3),
+                 num_arrived_msgs=UInt64(3), num_messages_generated=UInt64(5)),
+                (total_traveling_time=UInt64(0), total_distance=UInt64(0),
+                 num_arrived_msgs=UInt64(0), num_messages_generated=UInt64(1))]
         h5open(path, "w") do file
             group = create_group(file, "simulations_results/$id")
             group["vertices_attributes"] = rows
             group["json_string"] = collect(codeunits(JSON.json((message_generation=0.2, random_seed=42, routing_method="minimal_paths"))))
         end
-        @test result.average_delay == 1.5  # mean(8/2 -1,9/3 -1)= mean(3,2)
+        @test result.average_delay == 1.5  # mean(8/4, 9/3) - 1 = 1.5.
         @test result.average_traveling_time == 17 / 5 # Packet-weighted, not a mean of vertex means.
+        @test result.arrived_messages == 5     # 2 + 3 + 0.
+        @test result.generated_messages == 10 # 4 + 5 + 1, including the vertex without arrivals.
+        @test hasproperty(result, :arrived_messages)
+        @test hasproperty(result, :generated_messages)
         @test result.message_rate == 0.2
         @test result.routing isa MinimalPaths
         @test load_results(path)[id].average_delay == 1.5
+
+        # Lazy properties read the current file rather than caching previous totals.
+        rows[3] = merge(rows[3], (; num_arrived_msgs=UInt64(1), num_messages_generated=UInt64(2)))
+        h5open(path, "r+") do file
+            dataset = file["simulations_results/$id/vertices_attributes"]
+            write(dataset, rows)
+            close(dataset)
+        end
+        @test result.arrived_messages == 6
+        @test result.generated_messages == 11
     end
 end
 

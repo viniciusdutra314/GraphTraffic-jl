@@ -4,6 +4,7 @@
 A lazy reference to a simulation in an HDF5 file. No open file handles or arrays
 are retained. Each computed property opens the file, reads what it needs and
 closes it. Keep the underlying file available for the lifetime of the result.
+`arrived_messages` and `generated_messages` total the counters across all vertices.
 """
 struct SimulationResult
     path::String
@@ -38,6 +39,10 @@ function Base.getproperty(result::SimulationResult, name::Symbol)
         arrived > 0 || throw(ArgumentError("no arrived packets to average"))
         return sum(Float64(row.total_traveling_time) for row in rows) / arrived
     end
+    name === :arrived_messages && return sum(
+        row.num_arrived_msgs for row in read_dataset(result, "vertices_attributes"))
+    name === :generated_messages && return sum(
+        row.num_messages_generated for row in read_dataset(result, "vertices_attributes"))
     name === :message_rate && return Float64(metadata(result)["message_generation"])
     name === :routing && return read_routing(metadata(result)["routing_method"])
     if name === :seed
@@ -48,7 +53,8 @@ function Base.getproperty(result::SimulationResult, name::Symbol)
 end
 
 Base.propertynames(::SimulationResult, private::Bool=false) =
-    (:path, :id, :average_delay, :average_traveling_time, :message_rate, :routing, :seed)
+    (:path, :id, :average_delay, :average_traveling_time, :arrived_messages,
+     :generated_messages, :message_rate, :routing, :seed)
 
 function load_results(path::AbstractString)::Dict{SimulationID,SimulationResult}
     h5open(path, "r") do file
