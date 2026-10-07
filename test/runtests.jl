@@ -274,6 +274,19 @@ end
             [configs[1], configs[1]]; output=joinpath(dir, "duplicate.hdf5"))
         @test_throws ArgumentError("threads must be positive") call_graphtraffic_rs(
             configs; output=joinpath(dir, "threads.hdf5"), threads=0)
+        appended_config = unit_config(graph=cycle_graph(6), routing=LimitedVisibility(2),
+                                      message_rate=0.2, iterations=120, warmup=10, seed=42)
+        appended = call_graphtraffic_rs([appended_config]; output, threads=1, append=true)
+        @test Set(keys(appended)) == union(Set(keys(results)), Set([appended_config.id]))
+        @test appended[appended_config.id].routing.radius == 2
+        @test all(appended[id].seed == results[id].seed for id in keys(results))
+        @test_throws ArgumentError("simulation IDs already exist in output") call_graphtraffic_rs(
+            [configs[1]]; output, append=true)
+        @test_throws ArgumentError("overwrite and append are mutually exclusive") call_graphtraffic_rs(
+            [appended_config]; output, overwrite=true, append=true)
+        absent = joinpath(dir, "absent.hdf5")
+        @test_throws ArgumentError("append output does not exist: $absent") call_graphtraffic_rs(
+            [appended_config]; output=absent, append=true)
         repeated = call_graphtraffic_rs(reverse(configs); output=joinpath(dir, "repeat.hdf5"), threads=1)
         @test all(results[id].average_delay == repeated[id].average_delay for id in keys(results))
         unseeded = unit_config(graph=cycle_graph(6), message_rate=0.1,
