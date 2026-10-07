@@ -9,7 +9,8 @@ using UUIDs: UUID, uuid4
 
 export SimulationID, SimulationConfig, SimulationResult,
        MinimalPaths, RandomWalk, LimitedVisibility, call_graphtraffic_rs, load_results,
-       balanced_initial_capacity
+       balanced_initial_capacity, expected_limited_visibility_route_length,
+       average_expected_limited_visibility_route_length
 
 export Observer, ObserverEdgeQueue, ObserverEdgeReceivedMessages,
        ObserverEdgeCapacity, ObserverTotalMessages, Modifier, ModifierEdgeCapacity,
@@ -23,5 +24,6 @@ include("protocol.jl")
 include("results.jl")
 include("execution.jl")
 include("orchestrator.jl")
+include("absorbing_markov_chain.jl")
 
 end

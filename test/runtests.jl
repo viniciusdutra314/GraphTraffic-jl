@@ -13,6 +13,72 @@ using Random
 unit_capacity(graph) = balanced_initial_capacity(graph, ne(graph))
 unit_config(; graph, kwargs...) = SimulationConfig(; graph, initial_capacity=unit_capacity(graph), kwargs...)
 
+@testset "Limited-visibility expected routes" begin
+    @testset "Triangle: geometric waiting time without visibility" begin
+        # Every vertex is adjacent to the other two:
+        #     1
+        #    / \
+        #   2---3
+        # With radius 0, every step from a non-target vertex has probability
+        # 1/2 of reaching the target. Failure leaves us at another non-target
+        # vertex with the same probability on the next step.
+        # Thus E = 1 + (1/2)E, or E = 1 / (1/2) = 2 steps.
+        graph = complete_graph(3)
+        success_probability = 1 / 2
+        expected_random_walk_steps = 1 / success_probability
+        for target in vertices(graph)
+            expected_without_visibility = fill(expected_random_walk_steps, nv(graph))
+            expected_without_visibility[target] = 0
+            @test expected_limited_visibility_route_length(graph; target, visibility_radius=0) ≈
+                  expected_without_visibility
+
+            # Radius 1 makes every source see the target: one edge, no waiting.
+            expected_with_visibility = ones(nv(graph))
+            expected_with_visibility[target] = 0
+            @test expected_limited_visibility_route_length(graph; target, visibility_radius=1) ≈
+                  expected_with_visibility
+        end
+        # All distinct source-target pairs have the same expectation.
+        @test average_expected_limited_visibility_route_length(graph; visibility_radius=0, num_threads=2) ≈
+              expected_random_walk_steps
+        @test average_expected_limited_visibility_route_length(graph; visibility_radius=1, num_threads=2) ≈ 1
+    end
+
+    @testset "Two steps remain after entering the visible region" begin
+        # 1 (target) -- 2 -- 3 -- 4 (outside radius 2)
+        # Source 4 must step to 3, then follow 3 -> 2 -> 1 inside visibility.
+        graph = path_graph(4)
+        @test GraphTraffic.expected_visibility_region_hitting_time(graph; target=1, visibility_radius=2) ≈ [1]
+        routes = expected_limited_visibility_route_length(graph; target=1, visibility_radius=2)
+        @test routes[4] ≈ 1 + 2 # One step to visibility, plus the full radius.
+        @test routes[3] ≈ 2     # Already visible: 3 -> 2 -> 1.
+    end
+
+    @testset "Visibility at the diameter equals shortest-path distances" begin
+        # At this radius, every source sees the target, so routing is entirely
+        # along shortest paths. Compare exactly with Graphs.jl for every target.
+        for graph in (path_graph(5), cycle_graph(6), complete_graph(4),
+                      star_graph(6), complete_bipartite_graph(2, 3), grid([2, 3]))
+            visibility_radius = diameter(graph)
+            for target in vertices(graph)
+                @test expected_limited_visibility_route_length(
+                    graph; target, visibility_radius) == gdistances(graph, target)
+            end
+        end
+    end
+
+    @testset "Visibility expectation input errors" begin
+        graph = complete_graph(3)
+        @test_throws r"^UndefKeywordError: keyword argument `target` not assigned$" expected_limited_visibility_route_length(graph; visibility_radius=1)
+        @test_throws r"^UndefKeywordError: keyword argument `visibility_radius` not assigned$" expected_limited_visibility_route_length(graph; target=1)
+        @test_throws r"^UndefKeywordError: keyword argument `visibility_radius` not assigned$" average_expected_limited_visibility_route_length(graph)
+        @test_throws ArgumentError("visibility_radius must be nonnegative") expected_limited_visibility_route_length(graph; target=1, visibility_radius=-1)
+        @test_throws ArgumentError("visibility_radius must be nonnegative") average_expected_limited_visibility_route_length(graph; visibility_radius=-1)
+        @test_throws ArgumentError("graph must have at least two vertices") average_expected_limited_visibility_route_length(SimpleGraph(1); visibility_radius=0)
+        @test_throws ArgumentError("num_threads must be positive") average_expected_limited_visibility_route_length(graph; visibility_radius=0, num_threads=0)
+    end
+end
+
 struct WeightedTestGraph <: AbstractGraph{Int}
     inner::SimpleGraph{Int}
     weight::Int
@@ -104,7 +170,9 @@ Base.copy(graph::WeightedTestGraph) = WeightedTestGraph(copy(graph.inner), graph
 end
 
 # Record stage calls to verify the wrappers and optional cascading independently.
-struct TestExperiment <: Experiment end
+struct TestExperiment <: Experiment
+    TestExperiment() = error("experiment markers must not be instantiated")
+end
 
 # Mutable call records belong to the test fixture, never to the marker type.
 const test_stages = Symbol[]

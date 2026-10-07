@@ -17,6 +17,7 @@
             simulator = graphtraffic-rs.packages.${system}.default;
           in {
             default = pkgs.mkShell {
+              inputsFrom = [ graphtraffic-rs.devShells.${system}.default ];
               packages = [ pkgs.julia_112-bin simulator ];
               shellHook = ''
                 export JULIA_PROJECT=@.
