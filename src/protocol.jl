@@ -18,11 +18,13 @@ function write_edgelist(path::AbstractString, graph::AbstractGraph;
     validate_graph(graph)
     #make rust happy about graph indexing [0,V)
     indices = Dict(v => i - 1 for (i, v) in enumerate(vertices(graph)))
+    # Shared graph files must use the same edge order as every capacity file.
+    edge_list = sort!(canonical_edge.(collect(edges(graph))); by=e -> (src(e), dst(e)))
     open(path, "w") do io
         open(capacity_path, "w") do capacity_io
             println(io, nv(graph))
             println(io, ne(graph))
-            for edge in edges(graph)
+            for edge in edge_list
                 println(io, indices[src(edge)], ' ', indices[dst(edge)])
                 println(capacity_io, initial_capacity[canonical_edge(edge)])
             end
