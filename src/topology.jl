@@ -1,16 +1,22 @@
 using Graphs
-using StatsBase
+using Random
 
-function make_graph_connected!(g::SimpleGraph)
-    #efficient way to check if a component is not a tree
-    #without creating a subgraph
+"""
+    make_graph_connected!(g::SimpleGraph; rng=Random.default_rng())
+
+Connect a nonempty graph in place and return `g`. Prefer degree-preserving
+edge swaps; add an edge only when no swap between components is possible.
+"""
+function make_graph_connected!(g::SimpleGraph; rng::AbstractRNG=Random.default_rng())
+    nv(g) > 0 || throw(ArgumentError("graph must contain at least one vertex"))
+
+    # A connected component is a tree exactly when m == n - 1.
     function has_cycle(g::SimpleGraph, component::Vector)::Bool
         m = sum(degree(g, v) for v in component) ÷ 2
-        n = length(component)
-        return m >= n
+        return m >= length(component)
     end
 
-    function cycle_edges(g::SimpleGraph, component::Vector)::Vector{Edge}
+    function cycle_edges(g::SimpleGraph, component::Vector)
         sub, vmap = induced_subgraph(g, component)
         bridge_set = Set(bridges(sub))
         return [
@@ -20,45 +26,47 @@ function make_graph_connected!(g::SimpleGraph)
         ]
     end
 
-    old_nv=nv(g)
-    old_ne=ne(g)
-    comps=connected_components(g)
-    while length(comps)>1
-        comps_with_cycles=filter(has_cycle,comps)
-        comps_without_cycles=filter(!has_cycle,comps)
-        if !isempty(comps_with_cycles)
-            while true
-                comp_a=sample(comps_with_cycles)
-                comp_b=sample(isempty(comps_without_cycles) ? comps : comps_without_cycles) 
-                comp_a != comp_b && break
-            end
-            edge_a=sample(cycle_edges(g,comp_a))
-            edge_b=sample(edges(comp_b))
+    old_nv = nv(g)
+    old_ne = ne(g)
+    comps = connected_components(g)
+    while length(comps) > 1
+        comps_with_cycles = filter(c -> has_cycle(g, c), comps)
+        # Isolated vertices cannot supply an edge for a swap :(
+        trees_with_edges = filter(c -> length(c) > 1 && !has_cycle(g, c), comps)
+        if !isempty(comps_with_cycles) &&
+           (!isempty(trees_with_edges) || length(comps_with_cycles) > 1)
+            comp_a = rand(rng, comps_with_cycles)
+            # Prefer trees, otherwise choose a different cyclic component.
+            # Sampling eligible candidates directly avoids rejection loops.
+            candidates_b = isempty(trees_with_edges) ?
+                filter(c -> c != comp_a, comps_with_cycles) : trees_with_edges
+            comp_b = rand(rng, candidates_b)
+            edge_a = rand(rng, cycle_edges(g, comp_a))
+            sub_b, vmap_b = induced_subgraph(g, comp_b)
+            edge_b = rand(rng, collect(edges(sub_b)))
             u, v = src(edge_a), dst(edge_a)
-            x, y = src(edge_b), dst(edge_b)
-            #let's do a edge swap of comp_a that has x -> y
-            # and comp_b has u -> v
-            # creating x -> u , y -> v
-            rem_edge!(g,u,v)
-            rem_edge!(g,x,y)
-            add_edge!(g,u,x)
-            add_edge!(g,y,v)
+            x, y = vmap_b[src(edge_b)], vmap_b[dst(edge_b)]
+            # Removing a non-bridge keeps A connected. Even if removing B's
+            # edge splits B, both pieces reconnect through A. 
+            rem_edge!(g, u, v)
+            rem_edge!(g, x, y)
+            add_edge!(g, u, x)
+            add_edge!(g, y, v)
         else
-           while true
-                comp_a=sample(comps)
-                comp_b=sample(comps)
-                comp_a != comp_b && break
-           end
-           #all components have no cycles so the entire graph is a forest
-           #we need to add new edges
-           add_edge!(g,sample(comp_a),sample(comp_b))
+            comp_a = rand(rng, comps)
+            comp_b = rand(rng, filter(c -> c != comp_a, comps))
+            # No eligible swap remains: forests and isolated vertices need
+            # an addition.
+            add_edge!(g, rand(rng, comp_a), rand(rng, comp_b))
            @warn "Added 1 edge (degree sequence altered)."
         end
-        comps=connected_components(g)
+        new_comps = connected_components(g)
+        @assert length(new_comps) == length(comps) - 1 "Each operation must join exactly two components"
+        comps = new_comps
     end
-
 
     @assert old_nv == nv(g) "Graph should preserve the number of nodes"
     @assert old_ne <= ne(g) "Graph should preserve or add new edges"
-    @assert is_connected(g) "Graph should be make it connected"
+    @assert is_connected(g) "Graph should be connected"
+    return g
 end
