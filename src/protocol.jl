@@ -38,9 +38,9 @@ function config_to_schema(config::SimulationConfig, graph_path::AbstractString;
        routing_method=wire_routing(config.routing),
        message_generation=config.message_rate, max_iterations=config.iterations,
        warm_up_iterations=config.warmup, initial_capacity=abspath(capacity_path),
-       modifiers=wire_modifier.(config.modifiers), observers=wire_observer.(config.observers))
-    !isnothing(config.seed) && merge(schema, (; random_seed=config.seed))
-    !isnothing(config.metadata) && merge(schema, (;metadata=config.metadata)) 
+       modifiers=wire_modifier.(config.modifiers), observers=wire_observer.(config.observers),
+       metadata=config.metadata)
+    isnothing(config.seed) ? schema : merge(schema, (; random_seed=config.seed))
 end
 
 wire_observer(::ObserverEdgeQueue) = (; type="ObserverEdgeQueue")
