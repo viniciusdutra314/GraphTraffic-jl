@@ -1,5 +1,18 @@
+module Topology
 using Graphs
 using Random
+using IGraphs
+using Colors
+
+export make_graph_connected!,graph_type_to_colors,watts_strogatz_given_m,random_geometric_graph,avg_distance,edge_betweeness_normalized
+
+const graph_type_to_colors=Dict{String,RGB}(
+    "barabasi" => RGB(1.0,0.0,0.0),
+    "erdos" => RGB(0.0,0.0,1.0),
+    "geometrico" => RGB(0.0,1.0,0.0),
+    "watts" => RGB(0.569, 0.255, 0.675)
+)
+
 
 """
     make_graph_connected!(g::SimpleGraph; rng=Random.default_rng())
@@ -70,3 +83,41 @@ function make_graph_connected!(g::SimpleGraph; rng::AbstractRNG=Random.default_r
     @assert is_connected(g) "Graph should be connected"
     return g
 end
+
+function random_geometric_graph(n::Integer, m_expected::Integer;
+    r::AbstractFloat=sqrt(2 * m_expected / (pi * n * (n - 1)))
+)::SimpleGraph
+    g, _ = Graphs.euclidean_graph(n, 2, cutoff=r)
+    return g
+end
+
+function watts_strogatz_given_m(n::Integer, m::Integer, β::AbstractFloat)::SimpleGraph
+    k = div(2m, n)
+    if !iseven(k)
+        k += 1
+    end
+    return Graphs.watts_strogatz(n, k, β)
+end
+
+
+function avg_distance(g::SimpleGraph)::Float64
+    converted_graph::IGraphs.IGraph = IGraphs.IGraph(g)
+    IGraphs.LibIGraph.average_path_length(
+        converted_graph, IGraphs.IGNull(),
+        false, false)[1]
+end
+
+function edge_betweeness_normalized(g::SimpleGraph)::Vector{Float64}
+    result = Ref{IGraphs.LibIGraph.igraph_vector_t}()
+    IGraphs.LibIGraph.igraph_vector_init(result, Graphs.ne(g))
+    converted_graph::IGraphs.IGraph = IGraphs.IGraph(g)
+    IGraphs.LibIGraph.igraph_edge_betweenness(converted_graph.objref, C_NULL, result,
+        IGraphs.LibIGraph.igraph_ess_all(IGraphs.LibIGraph.IGRAPH_EDGEORDER_ID),
+        false, true)
+    result_vec = Vector{Float64}(undef, Graphs.ne(g))
+    for i in 1:Graphs.ne(g)
+        result_vec[i] = IGraphs.LibIGraph.igraph_vector_get(result, i - 1)
+    end
+    return result_vec
+end
+end 

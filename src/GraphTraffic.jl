@@ -11,7 +11,7 @@ export SimulationID, SimulationConfig, SimulationResult,
        MinimalPaths, RandomWalk, LimitedVisibility, call_graphtraffic_rs, load_results,
        uniform_initial_capacity, balanced_initial_capacity,
        expected_limited_visibility_route_length,
-       average_expected_limited_visibility_route_length
+       average_expected_limited_visibility_route_length,metadata
 
 export Observer, ObserverEdgeQueue, ObserverEdgeReceivedMessages,
        ObserverEdgeCapacity, ObserverTotalMessages, Modifier, ModifierEdgeCapacity,

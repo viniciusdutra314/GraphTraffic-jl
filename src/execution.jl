@@ -5,10 +5,10 @@ function graphtraffic_executable()
 end
 
 function call_graphtraffic_rs(configs::AbstractVector{<:SimulationConfig};
-                  output::AbstractString, threads::Integer=max(1, Sys.CPU_THREADS ÷ 2),
+                  output::AbstractString, num_threads::Integer=max(1, Sys.CPU_THREADS ÷ 2),
                   overwrite::Bool=false, append::Bool=false)::Dict{SimulationID,SimulationResult}
     isempty(configs) && throw(ArgumentError("configs must contain at least one simulation"))
-    threads > 0 || throw(ArgumentError("threads must be positive"))
+    num_threads > 0 || throw(ArgumentError("threads must be positive"))
     overwrite && append && throw(ArgumentError("overwrite and append are mutually exclusive"))
     ids = Set(config.id for config in configs)
     length(ids) == length(configs) || throw(ArgumentError("duplicate simulation IDs"))
@@ -36,7 +36,7 @@ function call_graphtraffic_rs(configs::AbstractVector{<:SimulationConfig};
         end
         target = append ? destination : joinpath(directory, "results.hdf5")
         append_flag = append ? ["--append"] : String[]
-        run(`$(graphtraffic_executable()) $json_path --output-file-hdf5 $target --threads $threads $append_flag`)
+        run(`$(graphtraffic_executable()) $json_path --output-file-hdf5 $target --threads $num_threads $append_flag`)
         append || mv(target, destination; force=overwrite)
     end
     load_results(destination)

@@ -39,6 +39,7 @@ function Base.getproperty(result::SimulationResult, name::Symbol)
         arrived > 0 || throw(ArgumentError("no arrived packets to average"))
         return sum(Float64(row.total_traveling_time) for row in rows) / arrived
     end
+    name === :total_messages && read_dataset(result,"ObserverTotalMessages")
     name === :arrived_messages && return sum(
         row.num_arrived_msgs for row in read_dataset(result, "vertices_attributes"))
     name === :generated_messages && return sum(

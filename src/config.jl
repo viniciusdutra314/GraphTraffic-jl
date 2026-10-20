@@ -45,24 +45,26 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
     initial_capacity::Dict{Edge{Int},UInt}
     observers::Vector{Observer}
     modifiers::Vector{Modifier}
+    metadata::Union{Nothing,JSON.Object}
     function SimulationConfig(; graph::AbstractGraph, routing::Routing=MinimalPaths(),
                               message_rate::Real, iterations::Integer,
                               warmup::Integer=0, seed::Union{Nothing,Integer}=nothing,
                               initial_capacity::AbstractDict{<:Edge,<:Unsigned},
                               id::SimulationID=uuid4(),
                               observers::AbstractVector{<:Observer}=Observer[],
-                              modifiers::AbstractVector{<:Modifier}=Modifier[])
+                              modifiers::AbstractVector{<:Modifier}=Modifier[],
+                              metadata::Union{Nothing,JSON.Object}=nothing
+                              )
         validate_graph(graph)
         rate = Float64(message_rate)
         0 < rate <= 1 || throw(ArgumentError("message_rate must be in (0, 1]"))
         iterations > 0 || throw(ArgumentError("iterations must be positive"))
         0 <= warmup < iterations || throw(ArgumentError("warmup must be in [0, iterations)"))
         isnothing(seed) || seed >= 0 || throw(ArgumentError("seed must be nonnegative"))
-        snapshot = copy(graph)
-        capacities = validate_initial_capacity(snapshot, initial_capacity)
-        new{typeof(snapshot),typeof(routing)}(id, snapshot, routing, rate,
+        capacities = validate_initial_capacity(graph, initial_capacity)
+        new{typeof(graph),typeof(routing)}(id, copy(graph), routing, rate,
                                               iterations, warmup, seed, capacities,
-                                              Observer[observers...], Modifier[modifiers...])
+                                              Observer[observers...], Modifier[modifiers...],metadata)
     end
 end
 
