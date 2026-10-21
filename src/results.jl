@@ -18,7 +18,7 @@ function read_dataset(result::SimulationResult, name::AbstractString)
     end
 end
 
-function metadata(result::SimulationResult)
+function original_json_config(result::SimulationResult)
     JSON.parse(String(read_dataset(result, "json_string")))
 end
 
@@ -39,15 +39,15 @@ function Base.getproperty(result::SimulationResult, name::Symbol)
         arrived > 0 || throw(ArgumentError("no arrived packets to average"))
         return sum(Float64(row.total_traveling_time) for row in rows) / arrived
     end
-    name === :total_messages && read_dataset(result,"ObserverTotalMessages")
+    name === :total_messages && return read_dataset(result,"ObserverTotalMessages")
     name === :arrived_messages && return sum(
         row.num_arrived_msgs for row in read_dataset(result, "vertices_attributes"))
     name === :generated_messages && return sum(
         row.num_messages_generated for row in read_dataset(result, "vertices_attributes"))
-    name === :message_rate && return Float64(metadata(result)["message_generation"])
-    name === :routing && return read_routing(metadata(result)["routing_method"])
+    name === :message_rate && return Float64(original_json_config(result)["message_generation"])
+    name === :routing && return read_routing(original_json_config(result)["routing_method"])
     if name === :seed
-        seed = get(metadata(result), "random_seed", nothing)
+        seed = get(original_json_config(result), "random_seed", nothing)
         return isnothing(seed) ? nothing : UInt64(seed)
     end
     getfield(result, name)
@@ -55,7 +55,7 @@ end
 
 Base.propertynames(::SimulationResult, private::Bool=false) =
     (:path, :id, :average_delay, :average_traveling_time, :arrived_messages,
-     :generated_messages, :message_rate, :routing, :seed)
+     :generated_messages, :message_rate, :routing, :seed,:total_messages)
 
 function load_results(path::AbstractString)::Dict{SimulationID,SimulationResult}
     h5open(path, "r") do file

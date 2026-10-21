@@ -412,7 +412,7 @@ end
         results = call_graphtraffic_rs(configs; output=joinpath(dir, "capacities.hdf5"), threads=1)
         for (config, supplied) in zip(configs, (manual, balanced))
             result = results[config.id]
-            @test haskey(GraphTraffic.metadata(result), "initial_capacity")
+            @test haskey(GraphTraffic.original_json_config(result), "initial_capacity")
             sample = only(capacity_samples(result))
             @test sample.iteration == 1
             h5open(result.path, "r") do file
@@ -462,7 +462,7 @@ end
         @test average_edge_capacity(observed; over=:final) >= 1
         @test average_edge_capacity(results[plain.id]; over=:final) == 1
         @test_throws ArgumentError("ObserverEdgeCapacity was not recorded") capacity_samples(results[plain.id])
-        meta = GraphTraffic.metadata(observed)
+        meta = GraphTraffic.original_json_config(observed)
         @test meta["observers"] == JSON.parse(JSON.json(schema.observers))
         @test meta["modifiers"] == JSON.parse(JSON.json(schema.modifiers))
         h5open(observed.path, "r") do file

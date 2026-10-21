@@ -18,6 +18,6 @@ using GraphTraffic: JSON
     mktempdir() do directory
         output = joinpath(directory, "metadata.hdf5")
         result = only(values(call_graphtraffic_rs([config]; output, num_threads=1)))
-        @test metadata(result)["metadata"] == annotations
+        @test original_json_config(result)["metadata"] == annotations
     end
 end
