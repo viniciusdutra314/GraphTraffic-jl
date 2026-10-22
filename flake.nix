@@ -1,9 +1,8 @@
 {
   description = "Julia environment + GraphTraffic-rs build binary";
 
-  inputs.self.submodules = true;
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-  inputs.graphtraffic-rs.url = "path:./GraphTraffic-rs";
+  inputs.graphtraffic-rs.url = "github:viniciusdutra314/GraphTraffic-rs";
 
   outputs = { nixpkgs, graphtraffic-rs, ... }:
     {
