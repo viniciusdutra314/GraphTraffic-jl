@@ -18,12 +18,16 @@ abstract type Modifier end
 struct ModifierEdgeCapacity <: Modifier
     free_flow_rate::Float64
     free_flow_sampling_time::UInt64
+    momentum::Float64
     function ModifierEdgeCapacity(; free_flow_rate::Real,
-                                  free_flow_sampling_time::Integer)
+                                  free_flow_sampling_time::Integer,
+                                  momentum::Real=0.0)
         rate = Float64(free_flow_rate)
+        smoothing = Float64(momentum)
         0 < rate <= 1 || throw(ArgumentError("free_flow_rate must be in (0, 1]"))
+        0 <= smoothing < 1 || throw(ArgumentError("momentum must be in [0, 1)"))
         # Rust uses this interval as a divisor, despite the schema allowing zero.
         free_flow_sampling_time > 0 || throw(ArgumentError("free_flow_sampling_time must be positive"))
-        new(rate, free_flow_sampling_time)
+        new(rate, free_flow_sampling_time, smoothing)
     end
 end

@@ -44,7 +44,7 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
     seed::Union{Nothing,UInt64}
     initial_capacity::Dict{Edge{Int},UInt}
     observers::Vector{Observer}
-    modifiers::Vector{Modifier}
+    modifier::Union{Nothing,Modifier}
     metadata::JSON.Object
     function SimulationConfig(; graph::AbstractGraph, routing::Routing=MinimalPaths(),
                               message_rate::Real, iterations::Integer,
@@ -52,7 +52,7 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
                               initial_capacity::AbstractDict{<:Edge,<:Unsigned},
                               id::SimulationID=uuid4(),
                               observers::AbstractVector{<:Observer}=Observer[],
-                              modifiers::AbstractVector{<:Modifier}=Modifier[],
+                              modifier::Union{Nothing,Modifier}=nothing,
                               metadata::JSON.Object=JSON.Object())
         validate_graph(graph)
         rate = Float64(message_rate)
@@ -63,7 +63,7 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
         capacities = validate_initial_capacity(graph, initial_capacity)
         new{typeof(graph),typeof(routing)}(id, copy(graph), routing, rate,
                                               iterations, warmup, seed, capacities,
-                                              Observer[observers...], Modifier[modifiers...],
+                                              Observer[observers...], modifier,
                                               deepcopy(metadata))
     end
 end

@@ -38,8 +38,11 @@ function config_to_schema(config::SimulationConfig, graph_path::AbstractString;
        routing_method=wire_routing(config.routing),
        message_generation=config.message_rate, max_iterations=config.iterations,
        warm_up_iterations=config.warmup, initial_capacity=abspath(capacity_path),
-       modifiers=wire_modifier.(config.modifiers), observers=wire_observer.(config.observers),
+       observers=wire_observer.(config.observers),
        metadata=config.metadata)
+    # The Rust schema accepts one modifier and represents no modifier by omission.
+    isnothing(config.modifier) ||
+        (schema = merge(schema, (; modifier=wire_modifier(config.modifier))))
     isnothing(config.seed) ? schema : merge(schema, (; random_seed=config.seed))
 end
 
@@ -49,4 +52,4 @@ wire_observer(::ObserverTotalMessages) = (; type="ObserverTotalMessages")
 wire_observer(o::ObserverEdgeCapacity) = (; type="ObserverEdgeCapacity", update_interval=o.update_interval)
 wire_modifier(m::ModifierEdgeCapacity) = (
     ; type="ModifierEdgeCapacity", free_flow_rate=m.free_flow_rate,
-    free_flow_sampling_time=m.free_flow_sampling_time)
+    free_flow_sampling_time=m.free_flow_sampling_time, momentum=m.momentum)

@@ -207,7 +207,7 @@ function simulation(experiment::Type{TestExperiment};
     push!(test_requested_threads, num_threads)
     configs = [unit_config(graph=cycle_graph(4), message_rate=rate,
                            iterations=40, warmup=5, seed=7) for rate in (0.1, 0.2)]
-    call_graphtraffic_rs(configs; output, threads=num_threads, overwrite)
+    call_graphtraffic_rs(configs; output, num_threads=num_threads, overwrite)
     nothing
 end
 function analysis(experiment::Type{TestExperiment}, results; num_threads)
@@ -364,7 +364,7 @@ end
                     message_rate=rate, iterations=120, warmup=10, seed=42)
                 for (routing, rate) in ((MinimalPaths(), 0.1), (RandomWalk(), 0.2), (LimitedVisibility(1), 0.3))]
         output = joinpath(dir, "results.hdf5")
-        results = call_graphtraffic_rs(configs; output, threads=2)
+        results = call_graphtraffic_rs(configs; output, num_threads=2)
         @test Set(keys(results)) == Set(config.id for config in configs)
         for config in configs
             result = results[config.id]
@@ -377,10 +377,10 @@ end
         @test_throws ArgumentError("duplicate simulation IDs") call_graphtraffic_rs(
             [configs[1], configs[1]]; output=joinpath(dir, "duplicate.hdf5"))
         @test_throws ArgumentError("threads must be positive") call_graphtraffic_rs(
-            configs; output=joinpath(dir, "threads.hdf5"), threads=0)
+            configs; output=joinpath(dir, "threads.hdf5"), num_threads=0)
         appended_config = unit_config(graph=cycle_graph(6), routing=LimitedVisibility(2),
                                       message_rate=0.2, iterations=120, warmup=10, seed=42)
-        appended = call_graphtraffic_rs([appended_config]; output, threads=1, append=true)
+        appended = call_graphtraffic_rs([appended_config]; output, num_threads=1, append=true)
         @test Set(keys(appended)) == union(Set(keys(results)), Set([appended_config.id]))
         @test appended[appended_config.id].routing.radius == 2
         @test all(appended[id].seed == results[id].seed for id in keys(results))
@@ -391,12 +391,12 @@ end
         absent = joinpath(dir, "absent.hdf5")
         @test_throws ArgumentError("append output does not exist: $absent") call_graphtraffic_rs(
             [appended_config]; output=absent, append=true)
-        repeated = call_graphtraffic_rs(reverse(configs); output=joinpath(dir, "repeat.hdf5"), threads=1)
+        repeated = call_graphtraffic_rs(reverse(configs); output=joinpath(dir, "repeat.hdf5"), num_threads=1)
         @test all(results[id].average_delay == repeated[id].average_delay for id in keys(results))
         unseeded = unit_config(graph=cycle_graph(6), message_rate=0.1,
                                     iterations=120, warmup=10)
         unseeded_result = only(values(call_graphtraffic_rs([unseeded];
-            output=joinpath(dir, "unseeded.hdf5"), threads=1)))
+            output=joinpath(dir, "unseeded.hdf5"), num_threads=1)))
         @test unseeded_result.seed === nothing
     end
 end
@@ -409,7 +409,7 @@ end
         message_rate=0.2, iterations=1, observers=[ObserverEdgeCapacity()])
         for capacities in (manual, balanced)]
     mktempdir() do dir
-        results = call_graphtraffic_rs(configs; output=joinpath(dir, "capacities.hdf5"), threads=1)
+        results = call_graphtraffic_rs(configs; output=joinpath(dir, "capacities.hdf5"), num_threads=1)
         for (config, supplied) in zip(configs, (manual, balanced))
             result = results[config.id]
             @test haskey(GraphTraffic.original_json_config(result), "initial_capacity")
@@ -437,23 +437,40 @@ end
     end
     observers = Observer[ObserverEdgeQueue(), ObserverEdgeReceivedMessages(),
                          ObserverEdgeCapacity(update_interval=5), ObserverTotalMessages()]
-    modifiers = [ModifierEdgeCapacity(free_flow_rate=0.9, free_flow_sampling_time=5)]
+    for momentum in (-0.1, 1, 1.1, NaN, Inf, -Inf)
+        @test_throws ArgumentError("momentum must be in [0, 1)") ModifierEdgeCapacity(
+            free_flow_rate=0.9, free_flow_sampling_time=5, momentum=momentum)
+    end
+    default_modifier = ModifierEdgeCapacity(free_flow_rate=0.9, free_flow_sampling_time=5)
+    @test default_modifier.momentum === 0.0
+    for momentum in (0, 1//2, prevfloat(1.0))
+        modifier = ModifierEdgeCapacity(free_flow_rate=0.9, free_flow_sampling_time=5; momentum)
+        @test modifier.momentum === Float64(momentum)
+        @test GraphTraffic.wire_modifier(modifier).momentum === Float64(momentum)
+    end
+    modifier = ModifierEdgeCapacity(free_flow_rate=0.9, free_flow_sampling_time=5, momentum=0.75)
     config = unit_config(graph=cycle_graph(4), message_rate=0.2,
-        iterations=40, warmup=10, observers=observers, modifiers=modifiers)
+        iterations=40, warmup=10, observers=observers, modifier=modifier)
     empty!(observers)
-    empty!(modifiers)
     @test length(config.observers) == 4
-    @test length(config.modifiers) == 1
+    @test config.modifier === modifier
+    @test_throws TypeError unit_config(graph=cycle_graph(4), message_rate=0.2,
+        iterations=40, modifier=[modifier])
     plain = unit_config(graph=cycle_graph(4), message_rate=0.2, iterations=40, warmup=10)
-    @test isempty(plain.observers) && isempty(plain.modifiers)
+    @test isempty(plain.observers) && isnothing(plain.modifier)
     schema = GraphTraffic.config_to_schema(config, "graph.edgelist"; capacity_path="capacity.txt")
     @test schema.observers == [(type="ObserverEdgeQueue",),
         (type="ObserverEdgeReceivedMessages",),
         (type="ObserverEdgeCapacity", update_interval=UInt64(5)), (type="ObserverTotalMessages",)]
-    @test schema.modifiers == [(type="ModifierEdgeCapacity", free_flow_rate=0.9,
-        free_flow_sampling_time=UInt64(5))]
+    @test schema.modifier == (type="ModifierEdgeCapacity", free_flow_rate=0.9,
+        free_flow_sampling_time=UInt64(5), momentum=0.75)
+    @test !hasproperty(schema, :modifiers)
+    plain_schema = GraphTraffic.config_to_schema(plain, "graph.edgelist"; capacity_path="capacity.txt")
+    @test !hasproperty(plain_schema, :modifier)
+    default_config = unit_config(graph=cycle_graph(4), message_rate=0.2,
+        iterations=40, modifier=default_modifier)
     mktempdir() do directory
-        results = call_graphtraffic_rs([config, plain]; output=joinpath(directory, "observed.hdf5"), threads=1)
+        results = call_graphtraffic_rs([config, plain, default_config]; output=joinpath(directory, "observed.hdf5"), num_threads=1)
         observed = results[config.id]
         samples = capacity_samples(observed)
         @test getproperty.(samples, :iteration) == collect(15:5:40)
@@ -464,7 +481,9 @@ end
         @test_throws ArgumentError("ObserverEdgeCapacity was not recorded") capacity_samples(results[plain.id])
         meta = GraphTraffic.original_json_config(observed)
         @test meta["observers"] == JSON.parse(JSON.json(schema.observers))
-        @test meta["modifiers"] == JSON.parse(JSON.json(schema.modifiers))
+        @test meta["modifier"] == JSON.parse(JSON.json(schema.modifier))
+        @test !haskey(GraphTraffic.original_json_config(results[plain.id]), "modifier")
+        @test GraphTraffic.original_json_config(results[default_config.id])["modifier"]["momentum"] == 0.0
         h5open(observed.path, "r") do file
             group = file["simulations_results/$(observed.id)"]
             @test length(read(group, "ObserverTotalMessages")) == 30

@@ -6,11 +6,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1792528575,
-        "narHash": "sha256-74JVrurWphaFEfZ7npueRBvloILtJSGaQikucL71syE=",
+        "lastModified": 1793054111,
+        "narHash": "sha256-FlZpClcmRAUYevqrHvWNIbTreSgQOqfPds40shpWInE=",
         "owner": "viniciusdutra314",
         "repo": "GraphTraffic-rs",
-        "rev": "aad41f5e003c6e891097d2c0248b49babca8a1cb",
+        "rev": "0297f45515d6b84db862ceb1b76568588f515b23",
         "type": "github"
       },
       "original": {
