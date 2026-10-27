@@ -35,7 +35,7 @@
                 old_degrees = degree(g)
                 old_edges = ne(g)
                 expected_logs = fill((:warn, "Added 1 edge (degree sequence altered)."), additions)
-                result = @test_logs expected_logs... GraphTraffic.make_graph_connected!(
+                result = @test_logs expected_logs... GraphTraffic.Topology.make_graph_connected!(
                     g; rng=MersenneTwister(seed))
                 @test result === g
                 @test nv(g) == n
@@ -56,7 +56,7 @@
             before = copy(g)
             rng = MersenneTwister(42)
             untouched_rng = copy(rng)
-            @test GraphTraffic.make_graph_connected!(g; rng) === g
+            @test GraphTraffic.Topology.make_graph_connected!(g; rng) === g
             @test g == before
             @test rand(rng, UInt64) == rand(untouched_rng, UInt64)
         end
@@ -66,19 +66,19 @@
         a = topology_graph(6, [triangle; [(4, 5), (5, 6), (4, 6)]])
         b = copy(a)
         rng_a, rng_b = MersenneTwister(19), MersenneTwister(19)
-        GraphTraffic.make_graph_connected!(a; rng=rng_a)
-        GraphTraffic.make_graph_connected!(b; rng=rng_b)
+        GraphTraffic.Topology.make_graph_connected!(a; rng=rng_a)
+        GraphTraffic.Topology.make_graph_connected!(b; rng=rng_b)
         @test a == b
         @test rand(rng_a, UInt64) == rand(rng_b, UInt64)
         # The existing call without a keyword must remain usable.
-        @test GraphTraffic.make_graph_connected!(b) === b
+        @test GraphTraffic.Topology.make_graph_connected!(b) === b
     end
 
     @testset "Empty graph is rejected before mutation" begin
         g = SimpleGraph(0)
         rng = MersenneTwister(42)
         untouched_rng = copy(rng)
-        @test_throws ArgumentError("graph must contain at least one vertex") GraphTraffic.make_graph_connected!(g; rng)
+        @test_throws ArgumentError("graph must contain at least one vertex") GraphTraffic.Topology.make_graph_connected!(g; rng)
         @test nv(g) == ne(g) == 0
         @test rand(rng, UInt64) == rand(untouched_rng, UInt64)
     end
