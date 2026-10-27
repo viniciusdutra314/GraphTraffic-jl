@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nix:
+    name: Test with Nix (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - macos-15-intel
+          - macos-15
+    env:
+      JULIA_NUM_THREADS: '2'
+      JULIA_NUM_PRECOMPILE_TASKS: '2'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Check flake on runner platform
+        run: nix flake check --no-update-lock-file
+
+      - name: Instantiate Julia environment through flake
+        run: nix develop --no-update-lock-file --command julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Run Julia tests through flake
+        run: |
+          nix develop --no-update-lock-file --command julia --project=. -e '
+            using Pkg
+            Pkg.test()
+          '

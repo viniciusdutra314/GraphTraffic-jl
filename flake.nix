@@ -6,11 +6,34 @@
 
   outputs = { nixpkgs, graphtraffic-rs, ... }:
     {
-      devShells = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ]
+      devShells = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ]
         (system:
           let
             pkgs = nixpkgs.legacyPackages.${system};
-            simulator = graphtraffic-rs.packages.${system}.default;
+            # The pinned simulator flake exposes Linux packages only. Build its
+            # same source/toolchain on Darwin until it exports Darwin packages.
+            simulator = graphtraffic-rs.packages.${system}.default or (
+              let
+                simulatorPkgs = import graphtraffic-rs.inputs.nixpkgs {
+                  inherit system;
+                  overlays = [ graphtraffic-rs.inputs.rust-overlay.overlays.default ];
+                };
+                toolchain = simulatorPkgs.rust-bin.fromRustupToolchainFile
+                  "${graphtraffic-rs}/rust-toolchain.toml";
+                rustPlatform = simulatorPkgs.makeRustPlatform {
+                  cargo = toolchain;
+                  rustc = toolchain;
+                };
+              in rustPlatform.buildRustPackage {
+                pname = "graph-traffic";
+                version = "0.1.0";
+                src = graphtraffic-rs;
+                cargoLock.lockFile = "${graphtraffic-rs}/Cargo.lock";
+                nativeBuildInputs = with simulatorPkgs; [ cmake pkg-config ];
+                buildInputs = with simulatorPkgs; [ zlib ];
+                doCheck = true;
+              }
+            );
           in {
             default = pkgs.mkShell {
               packages = [ pkgs.julia_112-bin simulator ];
