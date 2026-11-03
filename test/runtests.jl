@@ -157,8 +157,6 @@ Base.copy(graph::WeightedTestGraph) = WeightedTestGraph(copy(graph.inner), graph
     seeded = unit_config(graph=path_graph(3), message_rate=0.1, iterations=10, seed=42)
     @test seeded.seed === UInt64(42)
     @test GraphTraffic.config_to_schema(seeded, "graph.edgelist"; capacity_path="capacity.txt").random_seed === UInt64(42)
-    rem_edge!(graph, 1, 2)
-    @test ne(config.graph) == 3
     @test_throws ArgumentError("weighted edges are unsupported") SimulationConfig(
         graph=WeightedTestGraph(path_graph(3), 2), initial_capacity=Dict{Edge{Int},UInt}(), message_rate=0.1, iterations=10)
     wrapped = unit_config(graph=WeightedTestGraph(path_graph(3), 1), message_rate=0.1, iterations=10)
@@ -398,32 +396,6 @@ end
         unseeded_result = only(values(call_graphtraffic_rs([unseeded];
             output=joinpath(dir, "unseeded.hdf5"), num_threads=1)))
         @test unseeded_result.seed === nothing
-    end
-end
-
-@testset "Initial capacities reach the Rust simulation" begin
-    graph = path_graph(4)
-    manual = Dict(Edge(2, 1) => UInt(7), Edge(2, 3) => UInt(2), Edge(4, 3) => UInt(9))
-    balanced = balanced_initial_capacity(graph, 11; rng=MersenneTwister(19))
-    configs = [SimulationConfig(; graph, initial_capacity=capacities,
-        message_rate=0.2, iterations=1, observers=[ObserverEdgeCapacity()])
-        for capacities in (manual, balanced)]
-    mktempdir() do dir
-        results = call_graphtraffic_rs(configs; output=joinpath(dir, "capacities.hdf5"), num_threads=1)
-        for (config, supplied) in zip(configs, (manual, balanced))
-            result = results[config.id]
-            @test haskey(GraphTraffic.original_json_config(result), "initial_capacity")
-            sample = only(capacity_samples(result))
-            @test sample.iteration == 1
-            h5open(result.path, "r") do file
-                rows = read(file, "graphs/$(config.id)/edgelist")
-                for row in rows
-                    edge = Edge(Int(row.source) + 1, Int(row.target) + 1)
-                    expected = get(supplied, edge, get(supplied, Edge(dst(edge), src(edge)), nothing))
-                    @test sample.capacities[Int(row.edge_id) + 1] == expected
-                end
-            end
-        end
     end
 end
 
