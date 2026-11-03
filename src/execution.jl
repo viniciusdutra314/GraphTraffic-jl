@@ -23,8 +23,11 @@ function call_graphtraffic_rs(configs::AbstractVector{<:SimulationConfig};
     end
     mkpath(dirname(destination))
     mktempdir(dirname(destination)) do directory
+        graph_paths=IdDict()
         jsons_values = map(configs) do config
-            graph_path = joinpath(directory, "$(config.id).edgelist")
+            graph_path = get!(graph_paths, config.graph) do
+                joinpath(directory, "graph_$(uuid4()).edgelist")
+            end
             capacity_path = joinpath(directory, "$(config.id).capacity")
             write_edgelist(graph_path, config.graph;
                            capacity_path, initial_capacity=config.initial_capacity)

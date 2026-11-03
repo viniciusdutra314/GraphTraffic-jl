@@ -61,7 +61,7 @@ struct SimulationConfig{G<:AbstractGraph,R<:Routing}
         0 <= warmup < iterations || throw(ArgumentError("warmup must be in [0, iterations)"))
         isnothing(seed) || seed >= 0 || throw(ArgumentError("seed must be nonnegative"))
         capacities = validate_initial_capacity(graph, initial_capacity)
-        new{typeof(graph),typeof(routing)}(id, copy(graph), routing, rate,
+        new{typeof(graph),typeof(routing)}(id, graph, routing, rate,
                                               iterations, warmup, seed, capacities,
                                               Observer[observers...], modifier,
                                               deepcopy(metadata))
