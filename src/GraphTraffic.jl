@@ -14,8 +14,8 @@ export SimulationID, SimulationConfig, SimulationResult,
        average_expected_limited_visibility_route_length,original_json_config
 
 export Observer, ObserverEdgeQueue, ObserverEdgeReceivedMessages,
-       ObserverEdgeCapacity, ObserverTotalMessages, Modifier, ModifierEdgeCapacity,
-       capacity_samples, average_edge_capacity, total_edge_capacity
+       ObserverEdgeCapacity, ObserverTotalMessages, ObserverFreeFlowRate, Modifier, ModifierEdgeCapacity,
+       capacity_samples, average_edge_capacity, total_edge_capacity, free_flow_counts
 
 const SimulationID = UUID
 

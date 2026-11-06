@@ -96,3 +96,11 @@ function average_edge_capacity(result::SimulationResult; over::Symbol=:samples):
         return mean(mean(Float64.(sample.capacities)) for sample in samples)
     end
 end
+function free_flow_counts(result::SimulationResult)::Vector{NamedTuple{(:num_samples, :free_flow_times),Tuple{UInt64,UInt64}}}
+    h5open(result.path, "r") do file
+        path = "simulations_results/$(result.id)/ObserverFreeFlowRate"
+        haskey(file, path) || throw(ArgumentError("ObserverFreeFlowRate was not recorded"))
+        [(; num_samples=UInt64(row.num_samples), free_flow_times=UInt64(row.free_flow_times))
+         for row in read(file, path)]
+    end
+end

@@ -2,6 +2,8 @@
 abstract type Observer end
 struct ObserverEdgeQueue <: Observer end
 struct ObserverEdgeReceivedMessages <: Observer end
+"""Count samples with queue size ≤ current capacity on each edge after warmup."""
+struct ObserverFreeFlowRate <: Observer end
 struct ObserverTotalMessages <: Observer end
 
 struct ObserverEdgeCapacity <: Observer

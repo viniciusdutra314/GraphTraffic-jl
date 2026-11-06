@@ -48,6 +48,7 @@ end
 
 wire_observer(::ObserverEdgeQueue) = (; type="ObserverEdgeQueue")
 wire_observer(::ObserverEdgeReceivedMessages) = (; type="ObserverEdgeReceivedMessages")
+wire_observer(::ObserverFreeFlowRate) = (; type="ObserverFreeFlowRate")
 wire_observer(::ObserverTotalMessages) = (; type="ObserverTotalMessages")
 wire_observer(o::ObserverEdgeCapacity) = (; type="ObserverEdgeCapacity", update_interval=o.update_interval)
 wire_modifier(m::ModifierEdgeCapacity) = (

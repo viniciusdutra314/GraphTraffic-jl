@@ -12,6 +12,7 @@ using Random
 
 include("topology.jl")
 include("metadata.jl")
+include("free_flow.jl")
 
 unit_capacity(graph) = uniform_initial_capacity(graph, 1)
 unit_config(; graph, kwargs...) = SimulationConfig(; graph, initial_capacity=unit_capacity(graph), kwargs...)
